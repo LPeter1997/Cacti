@@ -473,3 +473,153 @@ impl FileState {
         }
     }
 }
+
+// WinAPI, ReadDirectoryChangesW  //////////////////////////////////////////////
+
+#[cfg(target_os = "windows")]
+mod win32 {
+    #![allow(non_snake_case)]
+
+    use std::ffi::{c_void, OsString};
+    use std::os::windows::ffi::OsStringExt;
+    use std::mem;
+    use std::ptr;
+
+    // Error type
+    const WAIT_TIMEOUT: u32 = 258;
+    // Formatting
+    const FORMAT_MESSAGE_FROM_SYSTEM   : u32 = 0x00001000;
+    const FORMAT_MESSAGE_IGNORE_INSERTS: u32 = 0x00000200;
+    // File access
+    const FILE_LIST_DIRECTORY: u32 = 0x0001;
+    // File share
+    const FILE_SHARE_READ  : u32 = 0x0001;
+    const FILE_SHARE_WRITE : u32 = 0x0002;
+    const FILE_SHARE_DELETE: u32 = 0x0004;
+    // File creation disposition
+    const OPEN_EXISTING: u32 = 3;
+    // File flags and attributes
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x02000000;
+    const FILE_FLAG_OVERLAPPED      : u32 = 0x40000000;
+    // File change notification filters
+    const FILE_NOTIFY_CHANGE_FILE_NAME : u32 = 0x00000001;
+    const FILE_NOTIFY_CHANGE_DIR_NAME  : u32 = 0x00000002;
+    const FILE_NOTIFY_CHANGE_LAST_WRITE: u32 = 0x00000010;
+
+    // Returned by handle-returning functions on failure
+    const INVALID_HANDLE_VALUE: *mut c_void = -1isize as *mut c_void;
+
+    type OverlappedCompletionRoutine =
+        Option<unsafe extern "system" fn(u32, u32, *mut c_void)>;
+
+    #[repr(C)]
+    struct OVERLAPPED {
+        Internal    : u64        ,
+        InternalHigh: u64        ,
+        Offset      : u32        ,
+        OffsetHigh  : u32        ,
+        hEvent      : *mut c_void,
+    }
+
+    impl OVERLAPPED {
+        fn zeroed() -> Self {
+            unsafe{ mem::zeroed() }
+        }
+    }
+
+    #[repr(C)]
+    struct FILE_NOTIFY_INFORMATION {
+        NextEntryOffset: u32     ,
+        Action         : u32     ,
+        FileNameLength : u32     ,
+        FileName       : *mut u16,
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetLastError() -> u32;
+
+        fn FormatMessageW(
+            flags  : u32          ,
+            source : *const c_void,
+            msg_id : u32          ,
+            lang_id: u32          ,
+            buffer : *mut u16     ,
+            size   : u32          ,
+            args   : *mut *mut i8 ,
+        ) -> u32;
+
+        fn CreateFileW(
+            file_name : *const u16 ,
+            access    : u32        ,
+            share_mode: u32        ,
+            security  : *mut c_void,
+            crea_disp : u32        ,
+            attr_flags: u32        ,
+            template  : *mut c_void,
+        ) -> *mut c_void;
+
+        fn CloseHandle(
+            handle: *mut c_void,
+        ) -> i32;
+
+        fn CreateIoCompletionPort(
+            file_handle   : *mut c_void,
+            existing_port : *mut c_void,
+            completion_key: u64        ,
+            thread_cnt    : u32        ,
+        ) -> *mut c_void;
+
+        fn ReadDirectoryChangesW(
+            directory_handle: *mut c_void                ,
+            res_buffer      : *mut c_void                ,
+            res_buffer_len  : u32                        ,
+            recursive       : i32                        ,
+            filter          : u32                        ,
+            bytes_written   : *mut u32                   ,
+            overlapped      : *mut OVERLAPPED            ,
+            callback        : OverlappedCompletionRoutine,
+        ) -> i32;
+
+        fn GetQueuedCompletionStatus(
+            port          : *mut c_void         ,
+            bytes_written : *mut u32            ,
+            completion_key: *mut u64            ,
+            overlapped    : *mut *mut OVERLAPPED,
+            timeout_ms    : u32                 ,
+        ) -> i32;
+    }
+
+    /// Returns the error message for the given error code.
+    fn error_code_to_message(code: u32) -> String {
+        const BUFFER_SIZE: usize = 512;
+        let mut msg_buff = mem::MaybeUninit::<[u16; BUFFER_SIZE]>::uninit();
+        let written: u32 = unsafe { FormatMessageW(
+            FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+            ptr::null(),
+            code,
+            0,
+            msg_buff.as_mut_ptr().cast(),
+            BUFFER_SIZE as u32,
+            ptr::null_mut()) };
+
+        if written == 0 {
+            // Unknown error
+            format!("<unknown> [code: {}]", code)
+        }
+        else {
+            let valid_part = unsafe{ std::slice::from_raw_parts(
+                msg_buff.as_ptr().cast::<u16>(), written as usize) };
+            let textual = OsString::from_wide(valid_part);
+            let text: &str = &textual.to_string_lossy().replace("\r\n", "");
+            format!("{} [code: {}]", text, code)
+        }
+    }
+
+    pub fn foo() {
+        let s = error_code_to_message(258);
+        println!("Formatted: {}", s);
+    }
+}
+
+pub use win32::foo;
