@@ -480,10 +480,11 @@ impl FileState {
 mod win32 {
     #![allow(non_snake_case)]
 
-    use std::ffi::{c_void, OsString};
-    use std::os::windows::ffi::OsStringExt;
+    use std::ffi::{c_void, OsStr};
+    use std::os::windows::ffi::OsStrExt;
     use std::mem;
     use std::ptr;
+    use super::*;
 
     // Error type
     const WAIT_TIMEOUT: u32 = 258;
@@ -590,36 +591,14 @@ mod win32 {
         ) -> i32;
     }
 
-    /// Returns the error message for the given error code.
-    fn error_code_to_message(code: u32) -> String {
-        const BUFFER_SIZE: usize = 512;
-        let mut msg_buff = mem::MaybeUninit::<[u16; BUFFER_SIZE]>::uninit();
-        let written: u32 = unsafe { FormatMessageW(
-            FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-            ptr::null(),
-            code,
-            0,
-            msg_buff.as_mut_ptr().cast(),
-            BUFFER_SIZE as u32,
-            ptr::null_mut()) };
-
-        if written == 0 {
-            // Unknown error
-            format!("<unknown> [code: {}]", code)
-        }
-        else {
-            let valid_part = unsafe{ std::slice::from_raw_parts(
-                msg_buff.as_ptr().cast::<u16>(), written as usize) };
-            let textual = OsString::from_wide(valid_part);
-            let text: &str = &textual.to_string_lossy().replace("\r\n", "");
-            format!("{} [code: {}]", text, code)
-        }
+    /// Returns the last OS error represented as an `io::Error`.
+    fn last_error() -> io::Error {
+        let error = unsafe { GetLastError() };
+        io::Error::from_raw_os_error(error as i32)
     }
 
-    pub fn foo() {
-        let s = error_code_to_message(258);
-        println!("Formatted: {}", s);
+    /// Converts the Rust string representation into a WinAPI WCHAR string.
+    fn to_wstring(s: &str) -> Vec<u16> {
+        OsStr::new(s).encode_wide().chain(Some(0).into_iter()).collect()
     }
 }
-
-pub use win32::foo;
