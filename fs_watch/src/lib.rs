@@ -28,9 +28,9 @@ pub type Result<T> = io::Result<T>;
 /// let mut watch = fs_watch::default_watch()?;
 ///
 /// // We can set the interval, in case this is a platform with no better
-/// // strategy to support other than polling. For a single file this isn't a
-/// // huge deal, but for larger folder structures it's important to keep poll
-/// // intervals as long as tolerable.
+/// // strategy to support other than polling, or due to some platform-specific
+/// // behavior. For a single file this isn't a huge deal, but for larger folder
+/// // structures it's important to keep poll intervals as long as tolerable.
 /// // Here we just allow polling twice every second.
 /// watch.set_interval(Duration::from_millis(500));
 ///
@@ -79,8 +79,12 @@ pub trait Watch: Sized {
     fn poll_event(&mut self) -> Option<Result<Event>>;
 
     /// In case of a `Watch` that relies on some polling technique, this sets
-    /// the interval that polling should be performed. If a `Watch` relies on
-    /// filesystem notifications, this interval is unused.
+    /// the interval that polling should be performed.
+    ///
+    /// If a `Watch` relies on filesystem notifications, this interval could be
+    /// unused, or set some platform-specific waiting behavior. For further
+    /// information, read the platform-specific `Watch` implementations
+    /// documentation.
     fn set_interval(&mut self, _interval: Duration) { }
 }
 
@@ -658,6 +662,42 @@ mod win32 {
         }
         else {
             Ok(())
+        }
+    }
+
+    /// The WinAPI-based watch, using `ReadDirectoryChangesW`.
+    pub struct WinApiWatch {
+    }
+
+    impl Watch for WinApiWatch {
+        fn new() -> Result<Self> {
+            Ok(Self{ })
+        }
+
+        fn watch(&mut self, p: impl AsRef<Path>, rec: Recursion) -> Result<()> {
+            let path = p.as_ref();
+            if !path.exists() {
+                // Watch the closest parent that DOES exist
+                unimplemented!();
+            }
+            else {
+                // Watch parent directory non-recursively
+                // if file, then it's enough
+                // if directory, then watch self recursively
+                unimplemented!();
+            }
+        }
+
+        fn unwatch(&mut self, p: impl AsRef<Path>) {
+            unimplemented!();
+        }
+
+        fn poll_event(&mut self) -> Option<Result<Event>> {
+            unimplemented!();
+        }
+
+        fn set_interval(&mut self, _interval: Duration) {
+            unimplemented!();
         }
     }
 }
