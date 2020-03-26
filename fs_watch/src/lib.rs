@@ -487,7 +487,8 @@ mod win32 {
     use super::*;
 
     // Error type
-    const WAIT_TIMEOUT: u32 = 258;
+    const ERROR_SUCCESS: u32 = 0;
+    const WAIT_TIMEOUT : u32 = 258;
     // Formatting
     const FORMAT_MESSAGE_FROM_SYSTEM   : u32 = 0x00001000;
     const FORMAT_MESSAGE_IGNORE_INSERTS: u32 = 0x00000200;
@@ -597,8 +598,54 @@ mod win32 {
         io::Error::from_raw_os_error(error as i32)
     }
 
-    /// Converts the Rust string representation into a WinAPI WCHAR string.
-    fn to_wstring(s: &str) -> Vec<u16> {
-        OsStr::new(s).encode_wide().chain(Some(0).into_iter()).collect()
+    /// Converts the Rust &OsStr into a WinAPI WCHAR string.
+    fn to_wstring(s: &OsStr) -> Vec<u16> {
+        s.encode_wide().chain(Some(0).into_iter()).collect()
+    }
+
+    /// Opens a file/folder for observing only.
+    fn open_path_for_observe(path: &Path) -> Result<*mut c_void> {
+        let handle = unsafe { CreateFileW(
+            to_wstring(path.as_os_str()).as_ptr(),
+            FILE_LIST_DIRECTORY,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            ptr::null_mut(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
+            ptr::null_mut()) };
+        if handle == INVALID_HANDLE_VALUE {
+            Err(last_error())
+        }
+        else {
+            Ok(handle)
+        }
+    }
+
+    /// Closes the file handle.
+    fn close_handle(handle: *mut c_void) {
+        unsafe { CloseHandle(handle) };
+    }
+
+    /// Reinterprets the given `DWORD` buffer to `FILE_NOTIFY_INFORMATION`s and
+    /// feeds them into a custom user-function.
+    fn read_file_notify_information<F>(buffer: *const u32, bytes_transferred: u32, mut f: F)
+        where F: FnMut(&FILE_NOTIFY_INFORMATION) {
+        if bytes_transferred == 0 {
+            // We can't even trust the first entry.
+            return;
+        }
+        // We can at least look at the first entry
+        let mut buffer: *const FILE_NOTIFY_INFORMATION = buffer.cast();
+        loop {
+            let entry = unsafe{ &*buffer };
+            f(entry);
+            if entry.NextEntryOffset == 0 {
+                // We are done
+                return;
+            }
+            // Go to the next entry
+            let buffer8: *const u8 = buffer.cast();
+            buffer = unsafe { buffer8.offset(entry.NextEntryOffset as isize).cast() };
+        }
     }
 }
