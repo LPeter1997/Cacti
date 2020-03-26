@@ -590,6 +590,11 @@ mod win32 {
             overlapped    : *mut *mut OVERLAPPED,
             timeout_ms    : u32                 ,
         ) -> i32;
+
+        fn SleepEx(
+            millis   : u32,
+            alertable: i32,
+        ) -> u32;
     }
 
     /// Returns the last OS error represented as an `io::Error`.
@@ -646,6 +651,36 @@ mod win32 {
             // Go to the next entry
             let buffer8: *const u8 = buffer.cast();
             buffer = unsafe { buffer8.offset(entry.NextEntryOffset as isize).cast() };
+        }
+    }
+
+    /// Subscribes to the next change notification for the given handle, with
+    /// the given result-buffer, callback and user-pointer.
+    fn subscribe_to_next_change<U>(
+        handle: *mut c_void,
+        recursive: bool,
+        result_buffer: &mut [u32],
+        callback: OverlappedCompletionRoutine,
+        user: *mut U,
+    ) -> Result<()> {
+        let mut bw: u32 = 0;
+
+        let mut overlapped = OVERLAPPED::zeroed();
+        overlapped.hEvent = user.cast();
+
+        if unsafe { ReadDirectoryChangesW(
+            handle,
+            result_buffer.as_mut_ptr().cast(),
+            (result_buffer.len() * mem::size_of::<u32>()) as u32,
+            if recursive { 1 } else { 0 },
+            FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE,
+            &mut bw,
+            &mut overlapped,
+            callback) } == 0 {
+            Err(last_error())
+        }
+        else {
+            Ok(())
         }
     }
 }
