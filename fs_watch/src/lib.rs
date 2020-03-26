@@ -488,10 +488,6 @@ mod win32 {
 
     // Error type
     const ERROR_SUCCESS: u32 = 0;
-    const WAIT_TIMEOUT : u32 = 258;
-    // Formatting
-    const FORMAT_MESSAGE_FROM_SYSTEM   : u32 = 0x00001000;
-    const FORMAT_MESSAGE_IGNORE_INSERTS: u32 = 0x00000200;
     // File access
     const FILE_LIST_DIRECTORY: u32 = 0x0001;
     // File share
@@ -541,16 +537,6 @@ mod win32 {
     extern "system" {
         fn GetLastError() -> u32;
 
-        fn FormatMessageW(
-            flags  : u32          ,
-            source : *const c_void,
-            msg_id : u32          ,
-            lang_id: u32          ,
-            buffer : *mut u16     ,
-            size   : u32          ,
-            args   : *mut *mut i8 ,
-        ) -> u32;
-
         fn CreateFileW(
             file_name : *const u16 ,
             access    : u32        ,
@@ -565,13 +551,6 @@ mod win32 {
             handle: *mut c_void,
         ) -> i32;
 
-        fn CreateIoCompletionPort(
-            file_handle   : *mut c_void,
-            existing_port : *mut c_void,
-            completion_key: u64        ,
-            thread_cnt    : u32        ,
-        ) -> *mut c_void;
-
         fn ReadDirectoryChangesW(
             directory_handle: *mut c_void                ,
             res_buffer      : *mut c_void                ,
@@ -581,14 +560,6 @@ mod win32 {
             bytes_written   : *mut u32                   ,
             overlapped      : *mut OVERLAPPED            ,
             callback        : OverlappedCompletionRoutine,
-        ) -> i32;
-
-        fn GetQueuedCompletionStatus(
-            port          : *mut c_void         ,
-            bytes_written : *mut u32            ,
-            completion_key: *mut u64            ,
-            overlapped    : *mut *mut OVERLAPPED,
-            timeout_ms    : u32                 ,
         ) -> i32;
 
         fn SleepEx(
@@ -608,8 +579,14 @@ mod win32 {
         s.encode_wide().chain(Some(0).into_iter()).collect()
     }
 
+    /// Forces the thread to go to sleep for the given amount of milliseconds,
+    /// allowing asynchronous operations to complete.
+    fn sleep(millis: u32) {
+        unsafe { SleepEx(millis, 1) };
+    }
+
     /// Opens a file/folder for observing only.
-    fn open_path_for_observe(path: &Path) -> Result<*mut c_void> {
+    fn open_handle_for_observe(path: &Path) -> Result<*mut c_void> {
         let handle = unsafe { CreateFileW(
             to_wstring(path.as_os_str()).as_ptr(),
             FILE_LIST_DIRECTORY,
