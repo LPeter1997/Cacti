@@ -160,6 +160,7 @@ pub type DefaultWatch = DefaultWatchImpl;
 /// The simplest `Watch` implementation, that basically doesn't watch anything.
 /// This is to not to break the library when a platform doesn't support even the
 /// simplest method of polling file info.
+#[derive(Debug)]
 pub struct NullWatch;
 
 impl Watch for NullWatch {
