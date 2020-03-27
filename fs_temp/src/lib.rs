@@ -1,119 +1,91 @@
-//! A minimalistic, dependency-free, cross-platform library for creating
-//! temporary files and directories.
+//! A minimalistic, dependency-free, cross-platform library for generating
+//! temporary file and directory paths.
+//!
+//! The library consists of 2 functions:
+//!  * [path](fn.path.html): For a unique path in a general, OS-specific
+//! location.
+//!  * [path_in](fn.path_in.html): For a unique path in a given root.
 
+use std::io::Result;
 use std::path::{Path, PathBuf};
 
-/// The `Result` type of this library.
-pub type Result<T> = std::io::Result<T>;
-
-/// Tries to find a path that's usable for creating a temporary directory at.
+/// Tries to find a path that's usable to create a temporary directory at. An
+/// optional extension can be supplied - without the dot - to generate a file
+/// path. The parent directory is guaranteed to exist.
 ///
-/// Note, that the function doesn't actually create the directory.
+/// Note, that the function doesn't actually create the directory or file.
 ///
 /// # Examples
 ///
-/// Let's say we want to extract a ZIP archive, but don't want to keep the files
-/// for long-term usage. We can use `directory` to find us a path that's great
-/// for giving us a path where we can unzip it.
+/// Creating a temporary directory:
 ///
 /// ```no_run
 /// use std::fs;
-/// # use std::path::Path;
 ///
-/// # fn extract_stuff(from: impl AsRef<Path>, to: impl AsRef<Path>) {}
 /// # fn main() -> std::io::Result<()> {
-/// let unzip_path = fs_temp::directory()?;
-/// // We have to create the path ourselves
-/// fs::create_dir(&unzip_path)?;
-/// extract_stuff("secret_memes.zip", &unzip_path);
+/// let temp_dir_path = fs_temp::path(None)?;
+/// fs::create_dir(&temp_dir_path)?;
+/// // Now we can work inside temp_dir_path!
 /// # Ok(())
 /// # }
 /// ```
-pub fn directory() -> Result<PathBuf> {
-    functions::directory()
-}
-
-/// Tries to find a path in the given root that's usable for creating a
-/// temporary directory at.
 ///
-/// Note, that the function doesn't actually create the directory.
-///
-/// # Examples
-///
-/// Let's say that our tests need a temporary file-structure. This means a
-/// unique directory for each test-case. To make cleanup easier, we'd like to
-/// create our test directories in a common parent directory.
+/// Creating a temporary TXT file:
 ///
 /// ```no_run
 /// use std::fs;
-/// # use std::path::Path;
 ///
 /// # fn main() -> std::io::Result<()> {
-/// let test_case_workdir = fs_temp::directory_in("test_root")?;
-/// // We have to create the path ourselves
-/// fs::create_dir(&test_case_workdir)?;
-/// // Now we can copy our file-structure in for testing
+/// let temp_file_path = fs_temp::path(Some("txt"))?;
+/// let temp_file = fs::File::create(&temp_file_path)?;
+/// // Now we can write to temp_file!
 /// # Ok(())
 /// # }
 /// ```
-pub fn directory_in(root: impl AsRef<Path>) -> Result<PathBuf> {
-    functions::directory_in(root)
-}
-
-/// Tries to find a path that's usable to create a temporary file. An optional
-/// extension can be supplied - without the dot.
-///
-/// Note, that the function doesn't actually create the file.
-///
-/// # Examples
-///
-/// When we want to download a file for short-term usage.
-///
-/// ```no_run
-/// # use std::path::Path;
-/// # fn download(link: &str, p: impl AsRef<Path>) {}
-/// # fn main() -> std::io::Result<()> {
-/// // We want to download a cute puppy picture to mirror it
-/// let temp_file = fs_temp::file(Some("jpg"))?;
-/// // Now we can use temp_file as a save path
-/// download("<some link>", temp_file);
-/// // Don't forget to delete the file, it's not nice to litter!
-/// # Ok(())
-/// # }
-/// ```
-pub fn file(extension: Option<&str>) -> Result<PathBuf> {
-    functions::file(extension)
+pub fn path(extension: Option<&str>) -> Result<PathBuf> {
+    functions::path(extension)
 }
 
 /// Tries to find a path under the given root that's usable to create a
-/// temporary file. An optional extension can be supplied - without the dot.
+/// temporary directory. An optional extension can be supplied - without the dot -
+/// to generate a file path. The parent directory is guaranteed to exist.
 ///
-/// Note, that the function doesn't actually create the file.
+/// Note, that the function doesn't actually create the directory or file.
 ///
 /// # Examples
 ///
-/// We want a file for short-term usage only in a specific location, probably in
-/// our work-directory.
+/// Creating a temporary directory inside our working directory:
 ///
 /// ```no_run
-/// # use std::path::Path;
-/// # fn download(link: &str, p: impl AsRef<Path>) {}
+/// use std::fs;
+///
 /// # fn main() -> std::io::Result<()> {
-/// # const WORK_DIR: &str = "";
-/// // We want to download a cute puppy picture to mirror it
-/// let temp_file = fs_temp::file_in(WORK_DIR, None)?;
-/// // Now we can use temp_file as a save path for example
-/// download("<some link>", temp_file);
+/// let temp_dir_path = fs_temp::path_in(".", None)?;
+/// fs::create_dir(&temp_dir_path)?;
+/// // Now we can work inside temp_dir_path!
 /// # Ok(())
 /// # }
 /// ```
-pub fn file_in(root: impl AsRef<Path>, extension: Option<&str>) -> Result<PathBuf> {
-    functions::file_in(root, extension)
+///
+/// Creating a temporary TXT file inside our working directory:
+///
+/// ```no_run
+/// use std::fs;
+///
+/// # fn main() -> std::io::Result<()> {
+/// let temp_file_path = fs_temp::path_in(".", Some("txt"))?;
+/// let temp_file = fs::File::create(&temp_file_path)?;
+/// // Now we can write to temp_file!
+/// # Ok(())
+/// # }
+/// ```
+pub fn path_in(root: impl AsRef<Path>, extension: Option<&str>) -> Result<PathBuf> {
+    functions::path_in(root, extension)
 }
 
 // WinAPI implementation ///////////////////////////////////////////////////////
 
-// NOTE: file_in and directory_in are kind of platform-independent...
+// NOTE: path_in is kind of platform-independent...
 
 #[cfg(target_os = "windows")]
 mod win32 {
@@ -171,9 +143,9 @@ mod win32 {
                 .duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
             for i in 0..TRY_COUNT {
                 // Combine the the timestamp and trial-index
-                let subfolder = f(timestamp, i);
+                let subdir = f(timestamp, i);
                 // Combine
-                root.push(subfolder);
+                root.push(subdir);
                 if !root.exists() {
                     return root;
                 }
@@ -183,28 +155,28 @@ mod win32 {
         }
     }
 
-    pub fn directory_in(root: impl AsRef<Path>) -> Result<PathBuf> {
+    pub fn path_in(root: impl AsRef<Path>, extension: Option<&str>) -> Result<PathBuf> {
         let root = root.as_ref().to_path_buf();
-        Ok(unique_path(root, |timestamp, i| format!("tmp_{}_{}", timestamp, i)))
+        if let Some(extension) = extension {
+            Ok(unique_path(root,
+                |timestamp, i| format!("tmp_{}_{}.{}", timestamp, i, extension)))
+        }
+        else {
+            Ok(unique_path(root,
+                |timestamp, i| format!("tmp_{}_{}", timestamp, i)))
+        }
     }
 
-    pub fn directory() -> Result<PathBuf> {
+    pub fn path(extension: Option<&str>) -> Result<PathBuf> {
         let root = tmp_path()?;
-        Ok(unique_path(root, |timestamp, i| format!("tmp_{}_{}", timestamp, i)))
-    }
-
-    pub fn file_in(root: impl AsRef<Path>, extension: Option<&str>) -> Result<PathBuf> {
-        let root = root.as_ref().to_path_buf();
-        let extension = extension.unwrap_or("TMP");
-        Ok(unique_path(root,
-            |timestamp, i| format!("tmp_{}_{}.{}", timestamp, i, extension)))
-    }
-
-    pub fn file(extension: Option<&str>) -> Result<PathBuf> {
-        let root = tmp_path()?;
-        let extension = extension.unwrap_or("TMP");
-        Ok(unique_path(root,
-            |timestamp, i| format!("tmp_{}_{}.{}", timestamp, i, extension)))
+        if let Some(extension) = extension {
+            Ok(unique_path(root,
+                |timestamp, i| format!("tmp_{}_{}.{}", timestamp, i, extension)))
+        }
+        else {
+            Ok(unique_path(root,
+                |timestamp, i| format!("tmp_{}_{}", timestamp, i)))
+        }
     }
 }
 
@@ -213,8 +185,44 @@ mod win32 {
 #[cfg(target_os = "windows")]
 mod functions {
     use super::win32;
-    pub use win32::directory_in;
-    pub use win32::file_in;
-    pub use win32::directory;
-    pub use win32::file;
+    pub use win32::path;
+    pub use win32::path_in;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_path_no_ext() -> Result<()> {
+        let fpath = path(None)?;
+        assert!(!fpath.exists());
+        let parent = fpath.parent();
+        assert!(parent.is_some());
+        assert!(parent.unwrap().exists());
+        Ok(())
+    }
+
+    #[test]
+    fn test_path_with_ext() -> Result<()> {
+        let fpath = path(Some("txt"))?;
+        assert!(!fpath.exists());
+        assert_eq!(fpath.extension().and_then(|p| p.to_str()), Some("txt"));
+        let parent = fpath.parent();
+        assert!(parent.is_some());
+        assert!(parent.unwrap().exists());
+        Ok(())
+    }
+
+    #[test]
+    fn test_path_in_root() -> Result<()> {
+        let root_path = path(None)?;
+        let fpath = path_in(&root_path, None)?;
+        assert!(!fpath.exists());
+        let parent = fpath.parent();
+        assert!(parent.is_some());
+        let parent = parent.unwrap();
+        assert_eq!(parent, &root_path);
+        Ok(())
+    }
 }
