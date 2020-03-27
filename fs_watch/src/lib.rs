@@ -22,10 +22,12 @@ pub type Result<T> = io::Result<T>;
 /// platform:
 ///
 /// ```no_run
+/// use fs_watch::*;
 /// use std::time::Duration;
 ///
+/// # fn main() -> std::io::Result<()> {
 /// // Ask for the default on this platform.
-/// let mut watch = fs_watch::default_watch()?;
+/// let mut watch = DefaultWatch::new()?;
 ///
 /// // We can set the interval, in case this is a platform with no better
 /// // strategy to support other than polling, or due to some platform-specific
@@ -46,6 +48,7 @@ pub type Result<T> = io::Result<T>;
 ///         }
 ///     }
 /// }
+/// # }
 /// ```
 pub trait Watch: Sized {
     /// Creates a new `Watch` with no files watched.
@@ -130,6 +133,7 @@ impl Event {
     }
 }
 
+/// The operations that can be done on a path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EventKind {
     /// The watched path has something created.
@@ -139,6 +143,13 @@ pub enum EventKind {
     /// The watched path has something deleted.
     Delete,
 }
+
+// Choosing the default for the OS.
+#[cfg(target_os = "windows")]      type DefaultWatchImpl = win32::WinApiWatch;
+#[cfg(not(target_os = "windows"))] type DefaultWatchImpl = PollWatch;
+
+/// The default, recommended `Watch` implementation for the platform.
+pub type DefaultWatch = DefaultWatchImpl;
 
 // ////////////////////////////////////////////////////////////////////////// //
 //                               Implementation                               //
@@ -302,7 +313,7 @@ impl FileState {
     }
 
     /// Creates a `FileState` for the given path, while logging errors. If
-    /// `_create` is `true`, creation `Event`s are also logged.
+    /// `log_create` is `true`, creation `Event`s are also logged.
     fn new_internal(
         path: impl AsRef<Path>,
         rec: Recursion,
@@ -678,6 +689,7 @@ mod win32 {
             let path = p.as_ref();
             if !path.exists() {
                 // Watch the closest parent that DOES exist
+                // Or just check if it exists when updating, roughly polling existance
                 unimplemented!();
             }
             else {
@@ -699,5 +711,22 @@ mod win32 {
         fn set_interval(&mut self, _interval: Duration) {
             unimplemented!();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path;
+
+    fn create_test_dir() {
+        let out_dir = path::PathBuf::from(env!("CARGO_TARGET_DIR"));
+        out_dir.push("test_wd");
+        fs::create_dir(&out_dir);
+    }
+
+    #[test]
+    fn test_null() {
+        create_test_dir();
     }
 }

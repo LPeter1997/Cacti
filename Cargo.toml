@@ -1,0 +1,6 @@
+[workspace]
+
+members = [
+    "fs_temp",
+    "fs_watch",
+]
