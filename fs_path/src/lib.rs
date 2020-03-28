@@ -4,13 +4,44 @@
 //! removed. There are still use-cases when it makes sense to ask for the path,
 //! when it's still valid.
 //!
-//! The whole API consists of the [FilePath](trait.FilePath.thml) `trait`.
+//! The whole public API consists of the [FilePath](trait.FilePath.html)
+//! `trait`.
+//!
+//! # Usage
+//!
+//! Just make sure to have [FilePath](trait.FilePath.html) in scope, and keep in
+//! mind that the operation can fail:
+//!
+//! ```no_run
+//! use std::fs::File;
+//! use std::path::PathBuf;
+//! use fs_path::FilePath;
+//!
+//! # fn main() -> std::io::Result<()> {
+//! let file = File::create("C:/TMP/foo.txt")?;
+//! let path = file.path()?;
+//! assert_eq!(path, PathBuf::from("C:/TMP/foo.txt"));
+//! # Ok(())
+//! # }
+//! ```
 //!
 //! # Porting the library to other platforms
 //!
-//! To port to other platforms, take a look at the private `trait FsPath`. The
-//! implemented type should be aliased as `FsPathImpl` on the appropriate
-//! platform.
+//! A single function named `path_for` has to be in global scope for the
+//! platform:
+//!
+//! ```no_run
+//! use std::io::Result;
+//! use std::path::PathBuf;
+//! use std::fs::File;
+//!
+//! fn path_for(handle: &File) -> Result<PathBuf> {
+//!     // ...
+//! # Ok(PathBuf::new())
+//! }
+//! ```
+//!
+//! Which should return the path for the handle, if possible.
 
 use std::fs::File;
 use std::path::PathBuf;
@@ -29,7 +60,7 @@ pub trait FilePath {
     /// ```no_run
     /// use std::fs::File;
     /// use std::path::PathBuf;
-    /// use fs_path::*;
+    /// use fs_path::FilePath;
     ///
     /// # fn main() -> std::io::Result<()> {
     /// let file = File::create("C:/TMP/foo.txt")?;
@@ -43,7 +74,7 @@ pub trait FilePath {
 
 impl FilePath for File {
     fn path(&self) -> Result<PathBuf> {
-        FsPathImpl::path_for(self)
+        path_for(self)
     }
 }
 
@@ -51,26 +82,15 @@ impl FilePath for File {
 //                               Implementation                               //
 // ////////////////////////////////////////////////////////////////////////// //
 
-/// This is the `trait` that platforms should implement. It's just a way to
-/// separate out the functionality into submodules.
-trait FsPath {
-    /// Returns the path for the given file handle, if possible.
-    fn path_for(file: &File) -> Result<PathBuf>;
-}
-
 // Unsupported implementation //////////////////////////////////////////////////
 
 mod unsupported {
     use std::io::{Error, ErrorKind};
     use super::*;
 
-    pub struct UnsupportedFsPath;
-
-    impl FsPath for UnsupportedFsPath {
-        fn path_for(_file: &File) -> Result<PathBuf> {
-            Err(Error::new(ErrorKind::Other,
-                "Asking the path of a file handle is unsupported on this platform!"))
-        }
+    pub fn path_for(_file: &File) -> Result<PathBuf> {
+        Err(Error::new(ErrorKind::Other,
+            "Asking the path of a file handle is unsupported on this platform!"))
     }
 }
 
@@ -98,39 +118,35 @@ mod win32 {
         ) -> u32;
     }
 
-    pub struct WinApiFsPath;
-
-    impl FsPath for WinApiFsPath {
-        fn path_for(file: &File) -> Result<PathBuf> {
-            let handle = file.as_raw_handle();
-            let required_size = unsafe { GetFinalPathNameByHandleW(
-                handle,
-                ptr::null_mut(),
-                0,
-                FILE_NAME_NORMALIZED) };
-            if required_size == 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            let mut buffer = vec![0u16; required_size as usize];
-            let written_size = unsafe { GetFinalPathNameByHandleW(
-                handle,
-                buffer.as_mut_ptr(),
-                required_size,
-                FILE_NAME_NORMALIZED) };
-            if written_size == 0 || written_size > required_size {
-                return Err(std::io::Error::last_os_error());
-            }
-            // Remove 0-terminator
-            let buffer = &buffer[..(written_size as usize)];
-            Ok(OsString::from_wide(buffer).into())
+    pub fn path_for(file: &File) -> Result<PathBuf> {
+        let handle = file.as_raw_handle();
+        let required_size = unsafe { GetFinalPathNameByHandleW(
+            handle,
+            ptr::null_mut(),
+            0,
+            FILE_NAME_NORMALIZED) };
+        if required_size == 0 {
+            return Err(std::io::Error::last_os_error());
         }
+        let mut buffer = vec![0u16; required_size as usize];
+        let written_size = unsafe { GetFinalPathNameByHandleW(
+            handle,
+            buffer.as_mut_ptr(),
+            required_size,
+            FILE_NAME_NORMALIZED) };
+        if written_size == 0 || written_size > required_size {
+            return Err(std::io::Error::last_os_error());
+        }
+        // Remove 0-terminator
+        let buffer = &buffer[..(written_size as usize)];
+        Ok(OsString::from_wide(buffer).into())
     }
 }
 
 // Choosing the right implementation based on platform.
 
-#[cfg(target_os = "windows")] type FsPathImpl = win32::WinApiFsPath;
-#[cfg(not(target_os = "windows"))] type FsPathImpl = unsupported::UnsupportedFsPath;
+#[cfg(target_os = "windows")] use win32::path_for;
+#[cfg(not(target_os = "windows"))] use unsupported::path_for;
 
 #[cfg(test)]
 mod tests {
