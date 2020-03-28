@@ -1,6 +1,7 @@
 [workspace]
 
 members = [
+    "fs_path",
     "fs_temp",
     "fs_watch",
 ]
