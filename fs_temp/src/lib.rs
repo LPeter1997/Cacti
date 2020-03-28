@@ -28,6 +28,9 @@
 //!  * (optional) `unique_in`: To search for a unique dile or directory name
 //! inside a given root directory. The default implementation just calls
 //! `generate_unique_path`.
+//!
+//! The implemented type should be aliased as `FsTempImpl` on the appropriate
+//! platform.
 
 use std::io::Result;
 use std::path::{Path, PathBuf};
