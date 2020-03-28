@@ -1,0 +1,29 @@
+language: rust
+rust:
+  - 1.42.0
+
+notifications:
+  email:
+    on_success: never
+    on_failure: always
+
+matrix:
+  include:
+  # Linux
+  - os: linux
+    dist: xenial
+    stage: test
+    name: "Tests - Linux"
+  # OS-X
+  - os: osx
+    osx_image: xcode11.3
+    stage: test
+    name: "Tests - OS-X"
+  # Windows
+  - os: windows
+    stage: test
+    name: "Tests - Windows"
+
+script:
+  - cargo build --verbose --all
+  - cargo test --verbose --all
