@@ -337,9 +337,11 @@ mod win32 {
         fn file_handle(path: &Path) -> Result<File> {
             OpenOptions::new()
                 .create_new(true)
+                .read(true).write(true)
                 .access_mode(GENERIC_READ | GENERIC_WRITE)
                 .share_mode(FILE_SHARE_DELETE)
-                .custom_flags(FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE)
+                .attributes(FILE_ATTRIBUTE_TEMPORARY)
+                .custom_flags(FILE_FLAG_DELETE_ON_CLOSE)
                 .open(path)
         }
     }
@@ -352,4 +354,66 @@ mod win32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
+
+    #[test]
+    fn test_path() -> Result<()> {
+        let p = path(None)?;
+        assert!(!p.exists());
+        assert!(p.extension() == None);
+        let parent = p.parent();
+        assert!(parent.is_some());
+        assert!(parent.unwrap().exists());
+        Ok(())
+    }
+
+    #[test]
+    fn test_path_with_extension() -> Result<()> {
+        let p = path(Some("txt"))?;
+        assert!(!p.exists());
+        assert!(p.extension() == Some(&OsString::from("txt")));
+        let parent = p.parent();
+        assert!(parent.is_some());
+        assert!(parent.unwrap().exists());
+        Ok(())
+    }
+
+    #[test]
+    fn test_path_in() -> Result<()> {
+        // We kinda depend on `path` for this
+        let root = path(None)?;
+        let p = path_in(&root, None)?;
+        assert!(!p.exists());
+        assert!(p.extension() == None);
+        let parent = p.parent();
+        assert!(parent.is_some());
+        assert_eq!(parent.unwrap(), root);
+        Ok(())
+    }
+
+    #[test]
+    fn test_file() -> Result<()> {
+        // NOTE: We can't get file path
+        {
+            let _f = file(Some("txt"))?;
+        }
+        // NOTE: We can't detect if it was deleted
+        Ok(())
+    }
+
+    // NOTE: Test file_in?
+
+    #[test]
+    fn test_directory() -> Result<()> {
+        let mut dpath = None;
+        {
+            let d = directory()?;
+            dpath = Some(d.path().to_path_buf());
+            assert!(dpath.as_ref().unwrap().exists());
+        }
+        assert!(!dpath.unwrap().exists());
+        Ok(())
+    }
+
+    // NOTE: Test directory_in?
 }
