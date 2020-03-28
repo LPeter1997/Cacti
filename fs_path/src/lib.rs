@@ -163,7 +163,10 @@ mod unix {
 // Choosing the right implementation based on platform.
 
 #[cfg(target_os = "windows")] use win32::path_for;
-#[cfg(not(target_os = "windows"))] use unsupported::path_for;
+#[cfg(target_family = "unix")] use unix::path_for;
+#[cfg(not(any(
+    target_os = "windows", target_family = "unix"
+)))] use unsupported::path_for;
 
 #[cfg(test)]
 mod tests {
