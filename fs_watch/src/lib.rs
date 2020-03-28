@@ -721,9 +721,9 @@ mod tests {
     use std::path;
 
     fn create_test_dir() {
-        let out_dir = path::PathBuf::from(env!("CARGO_TARGET_DIR"));
+        /*let out_dir = path::PathBuf::from(env!("CARGO_TARGET_DIR"));
         out_dir.push("test_wd");
-        fs::create_dir(&out_dir);
+        fs::create_dir(&out_dir);*/
     }
 
     #[test]
