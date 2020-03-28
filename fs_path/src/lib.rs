@@ -16,6 +16,10 @@ use std::fs::File;
 use std::path::PathBuf;
 use std::io::Result;
 
+// ////////////////////////////////////////////////////////////////////////// //
+//                                    API                                     //
+// ////////////////////////////////////////////////////////////////////////// //
+
 /// The `trait` that's being implemented for `File`s.
 pub trait FilePath {
     /// Returns the path of this `File` handle, if it's valid.
@@ -43,12 +47,34 @@ impl FilePath for File {
     }
 }
 
+// ////////////////////////////////////////////////////////////////////////// //
+//                               Implementation                               //
+// ////////////////////////////////////////////////////////////////////////// //
+
 /// This is the `trait` that platforms should implement. It's just a way to
 /// separate out the functionality into submodules.
 trait FsPath {
     /// Returns the path for the given file handle, if possible.
     fn path_for(file: &File) -> Result<PathBuf>;
 }
+
+// Unsupported implementation //////////////////////////////////////////////////
+
+mod unsupported {
+    use std::io::{Error, ErrorKind};
+    use super::*;
+
+    pub struct UnsupportedFsPath;
+
+    impl FsPath for UnsupportedFsPath {
+        fn path_for(_file: &File) -> Result<PathBuf> {
+            Err(Error::new(ErrorKind::Other,
+                "Asking the path of a file handle is unsupported on this platform!"))
+        }
+    }
+}
+
+// WinAPI implementation ///////////////////////////////////////////////////////
 
 #[cfg(target_os = "windows")]
 mod win32 {
@@ -104,6 +130,7 @@ mod win32 {
 // Choosing the right implementation based on platform.
 
 #[cfg(target_os = "windows")] type FsPathImpl = win32::WinApiFsPath;
+#[cfg(not(target_os = "windows"))] type FsPathImpl = unsupported::UnsupportedFsPath;
 
 #[cfg(test)]
 mod tests {
