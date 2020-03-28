@@ -25,5 +25,5 @@ matrix:
     name: "Tests - Windows"
 
 script:
-  - cargo build --verbose --all
-  - cargo test --verbose --all
+  - cargo build --package fs_path --verbose --all
+  - cargo test --package fs_path --verbose --all
