@@ -85,6 +85,8 @@ impl FilePath for File {
 // Unsupported implementation //////////////////////////////////////////////////
 
 mod unsupported {
+    #![allow(dead_code)]
+
     use std::io::{Error, ErrorKind};
     use super::*;
 
@@ -140,6 +142,21 @@ mod win32 {
         // Remove 0-terminator
         let buffer = &buffer[..(written_size as usize)];
         Ok(OsString::from_wide(buffer).into())
+    }
+}
+
+// Unix implementation /////////////////////////////////////////////////////////
+
+#[cfg(target_family = "unix")]
+mod unix {
+    use std::os::unix::io::AsRawFd;
+    use std::fs;
+    use super::*;
+
+    pub fn path_for(file: &File) -> Result<PathBuf> {
+        let id = file.as_raw_fd();
+        let symlink = format!("/proc/self/fd/{}", id);
+        fs::read_link(&symlink)
     }
 }
 
