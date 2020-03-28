@@ -1,91 +1,82 @@
 //! A minimalistic, dependency-free, cross-platform library for generating
-//! temporary file and directory paths.
-//!
-//! The library consists of 2 functions:
-//!  * [path](fn.path.html): For a unique path in a general, OS-specific
-//! location.
-//!  * [path_in](fn.path_in.html): For a unique path in a given root.
+//! temporary files and directories.
 
 use std::io::Result;
 use std::path::{Path, PathBuf};
+use std::fs::File;
+use std::fs;
 
-/// Tries to find a path that's usable to create a temporary directory at. An
-/// optional extension can be supplied - without the dot - to generate a file
-/// path. The parent directory is guaranteed to exist.
-///
-/// Note, that the function doesn't actually create the directory or file.
-///
-/// # Examples
-///
-/// Creating a temporary directory:
-///
-/// ```no_run
-/// use std::fs;
-///
-/// # fn main() -> std::io::Result<()> {
-/// let temp_dir_path = fs_temp::path(None)?;
-/// fs::create_dir(&temp_dir_path)?;
-/// // Now we can work inside temp_dir_path!
-/// # Ok(())
-/// # }
-/// ```
-///
-/// Creating a temporary TXT file:
-///
-/// ```no_run
-/// use std::fs;
-///
-/// # fn main() -> std::io::Result<()> {
-/// let temp_file_path = fs_temp::path(Some("txt"))?;
-/// let temp_file = fs::File::create(&temp_file_path)?;
-/// // Now we can write to temp_file!
-/// # Ok(())
-/// # }
-/// ```
+// ////////////////////////////////////////////////////////////////////////// //
+//                                    API                                     //
+// ////////////////////////////////////////////////////////////////////////// //
+
 pub fn path(extension: Option<&str>) -> Result<PathBuf> {
-    functions::path(extension)
+    path_in(&FsTempImpl::tmp_path()?, extension)
 }
 
-/// Tries to find a path under the given root that's usable to create a
-/// temporary directory. An optional extension can be supplied - without the dot -
-/// to generate a file path. The parent directory is guaranteed to exist.
-///
-/// Note, that the function doesn't actually create the directory or file.
-///
-/// # Examples
-///
-/// Creating a temporary directory inside our working directory:
-///
-/// ```no_run
-/// use std::fs;
-///
-/// # fn main() -> std::io::Result<()> {
-/// let temp_dir_path = fs_temp::path_in(".", None)?;
-/// fs::create_dir(&temp_dir_path)?;
-/// // Now we can work inside temp_dir_path!
-/// # Ok(())
-/// # }
-/// ```
-///
-/// Creating a temporary TXT file inside our working directory:
-///
-/// ```no_run
-/// use std::fs;
-///
-/// # fn main() -> std::io::Result<()> {
-/// let temp_file_path = fs_temp::path_in(".", Some("txt"))?;
-/// let temp_file = fs::File::create(&temp_file_path)?;
-/// // Now we can write to temp_file!
-/// # Ok(())
-/// # }
-/// ```
 pub fn path_in(root: impl AsRef<Path>, extension: Option<&str>) -> Result<PathBuf> {
-    functions::path_in(root, extension)
+    FsTempImpl::unique_in(root.as_ref(), extension)
+}
+
+pub fn file(extension: Option<&str>) -> Result<File> {
+    FsTempImpl::file_handle(&path(extension)?)
+}
+
+pub fn file_in(root: impl AsRef<Path>, extension: Option<&str>) -> Result<File> {
+    FsTempImpl::file_handle(&path_in(root, extension)?)
+}
+
+pub fn directory() -> Result<Directory> {
+    directory_in(&FsTempImpl::tmp_path()?)
+}
+
+pub fn directory_in(root: impl AsRef<Path>) -> Result<Directory> {
+    let path = path_in(root, None)?;
+    fs::create_dir(&path)?;
+    Ok(Directory{ path })
+}
+
+#[derive(Debug)]
+pub struct Directory {
+    path: PathBuf,
+}
+
+impl Directory {
+    pub fn path(&self) -> &Path { &self.path }
+}
+
+impl Drop for Directory {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+// ////////////////////////////////////////////////////////////////////////// //
+//                               Implementation                               //
+// ////////////////////////////////////////////////////////////////////////// //
+
+/// The functionality every platform must implement.
+trait FsTemp {
+    /// Returns a default temporary path for the given platform.
+    fn tmp_path() -> Result<PathBuf>;
+
+    /// Creates a file handle that automatically gets deleted when closed.
+    fn file_handle(path: &Path) -> Result<File>;
+
+    /// The default unique file/directory name searching strategy for the
+    /// platform.
+    fn unique_in(root: &Path, extension: Option<&str>) -> Result<PathBuf> {
+        generate_unique_path(root, extension)
+    }
+}
+
+/// A general strategy to find a unique directory or file name in the given
+/// root directory.
+fn generate_unique_path(root: &Path, extension: Option<&str>) -> Result<PathBuf> {
+    unimplemented!()
 }
 
 // WinAPI implementation ///////////////////////////////////////////////////////
-
-// NOTE: path_in is kind of platform-independent...
 
 #[cfg(target_os = "windows")]
 mod win32 {
@@ -93,11 +84,21 @@ mod win32 {
 
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
+    use std::fs::OpenOptions;
+    use std::os::windows::fs::OpenOptionsExt;
     use std::path::{Path, PathBuf};
-    use std::time::SystemTime;
     use std::mem::MaybeUninit;
     use std::slice;
     use super::*;
+
+    // Access constants
+    const GENERIC_READ : u32 = 0x80000000;
+    const GENERIC_WRITE: u32 = 0x40000000;
+    // Share constants
+    const FILE_SHARE_DELETE: u32 = 0x00000004;
+    // Flags and attributes
+    const FILE_ATTRIBUTE_TEMPORARY : u32 = 0x00000100;
+    const FILE_FLAG_DELETE_ON_CLOSE: u32 = 0x04000000;
 
     #[link(name = "kernel32")]
     extern "system" {
@@ -107,122 +108,45 @@ mod win32 {
         ) -> u32;
     }
 
-    /// Returns what Windows thinks is a good root-directory for temporaries,
-    /// based on `GetTempPathW`.
-    fn tmp_path() -> Result<PathBuf> {
-        const BUFFER_SIZE: usize = 261;
+    /// The Win32 implementation of the library.
+    pub struct WinApiTemp;
 
-        let mut buffer: MaybeUninit<[u16; BUFFER_SIZE]> = MaybeUninit::uninit();
-        let filled = unsafe { GetTempPathW(
-            BUFFER_SIZE as u32,
-            buffer.as_mut_ptr().cast()) };
+    impl FsTemp for WinApiTemp {
+        fn tmp_path() -> Result<PathBuf> {
+            const BUFFER_SIZE: usize = 261;
 
-        if filled == 0 {
-            Err(std::io::Error::last_os_error())
-        }
-        else {
-            let buffer: &[u16] = unsafe { slice::from_raw_parts(
-                buffer.as_ptr().cast(),
-                filled as usize) };
-            Ok(OsString::from_wide(buffer).into())
-        }
-    }
+            let mut buffer: MaybeUninit<[u16; BUFFER_SIZE]> = MaybeUninit::uninit();
+            let filled = unsafe { GetTempPathW(
+                BUFFER_SIZE as u32,
+                buffer.as_mut_ptr().cast()) };
 
-    /// Creates a unique path in the given root, using the given formatter
-    /// function. The formatter function creates the last postion of the path
-    /// based on a timestamp and trial-index.
-    fn unique_path<F>(mut root: PathBuf, mut f: F) -> PathBuf
-        where F: FnMut(u128, usize) -> String {
-
-        const TRY_COUNT: usize = 16384;
-
-        loop {
-            // NOTE: Can this `unwrap` ever fail?
-            // Generate a timestamp
-            let timestamp = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
-            for i in 0..TRY_COUNT {
-                // Combine the the timestamp and trial-index
-                let subdir = f(timestamp, i);
-                // Combine
-                root.push(subdir);
-                if !root.exists() {
-                    return root;
-                }
-                // Already exists, remove the added portion
-                root.pop();
+            if filled == 0 {
+                Err(std::io::Error::last_os_error())
+            }
+            else {
+                let buffer: &[u16] = unsafe { slice::from_raw_parts(
+                    buffer.as_ptr().cast(),
+                    filled as usize) };
+                Ok(OsString::from_wide(buffer).into())
             }
         }
-    }
 
-    pub fn path_in(root: impl AsRef<Path>, extension: Option<&str>) -> Result<PathBuf> {
-        let root = root.as_ref().to_path_buf();
-        if let Some(extension) = extension {
-            Ok(unique_path(root,
-                |timestamp, i| format!("tmp_{}_{}.{}", timestamp, i, extension)))
-        }
-        else {
-            Ok(unique_path(root,
-                |timestamp, i| format!("tmp_{}_{}", timestamp, i)))
-        }
-    }
-
-    pub fn path(extension: Option<&str>) -> Result<PathBuf> {
-        let root = tmp_path()?;
-        if let Some(extension) = extension {
-            Ok(unique_path(root,
-                |timestamp, i| format!("tmp_{}_{}.{}", timestamp, i, extension)))
-        }
-        else {
-            Ok(unique_path(root,
-                |timestamp, i| format!("tmp_{}_{}", timestamp, i)))
+        fn file_handle(path: &Path) -> Result<File> {
+            OpenOptions::new()
+                .create_new(true)
+                .access_mode(GENERIC_READ | GENERIC_WRITE)
+                .share_mode(FILE_SHARE_DELETE)
+                .custom_flags(FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE)
+                .open(path)
         }
     }
 }
 
-// Defaults for OSes inside `functions` module.
+// Choosing the right implementation based on platform.
 
-#[cfg(target_os = "windows")]
-mod functions {
-    use super::win32;
-    pub use win32::path;
-    pub use win32::path_in;
-}
+#[cfg(target_os = "windows")] type FsTempImpl = win32::WinApiTemp;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_path_no_ext() -> Result<()> {
-        let fpath = path(None)?;
-        assert!(!fpath.exists());
-        let parent = fpath.parent();
-        assert!(parent.is_some());
-        assert!(parent.unwrap().exists());
-        Ok(())
-    }
-
-    #[test]
-    fn test_path_with_ext() -> Result<()> {
-        let fpath = path(Some("txt"))?;
-        assert!(!fpath.exists());
-        assert_eq!(fpath.extension().and_then(|p| p.to_str()), Some("txt"));
-        let parent = fpath.parent();
-        assert!(parent.is_some());
-        assert!(parent.unwrap().exists());
-        Ok(())
-    }
-
-    #[test]
-    fn test_path_in_root() -> Result<()> {
-        let root_path = path(None)?;
-        let fpath = path_in(&root_path, None)?;
-        assert!(!fpath.exists());
-        let parent = fpath.parent();
-        assert!(parent.is_some());
-        let parent = parent.unwrap();
-        assert_eq!(parent, &root_path);
-        Ok(())
-    }
 }
