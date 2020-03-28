@@ -145,9 +145,9 @@ mod win32 {
     }
 }
 
-// Unix implementation /////////////////////////////////////////////////////////
+// Linux implementation ////////////////////////////////////////////////////////
 
-#[cfg(target_family = "unix")]
+#[cfg(target_os = "linux")]
 mod linux {
     use std::os::unix::io::AsRawFd;
     use std::fs;
@@ -160,12 +160,31 @@ mod linux {
     }
 }
 
+// OSX implementation //////////////////////////////////////////////////////////
+
+#[cfg(target_os = "macos")]
+mod macos {
+    use super::*;
+
+    #[link(name = "c")]
+    extern "C" {
+        fn fcntl(fd: i32, cmd: i32, ...) -> i32;
+    }
+
+    pub fn path_for(file: &File) -> Result<PathBuf> {
+        unimplemented!()
+    }
+}
+
 // Choosing the right implementation based on platform.
 
 #[cfg(target_os = "windows")] use win32::path_for;
 #[cfg(target_os = "linux")] use linux::path_for;
+#[cfg(target_os = "macos")] use macos::path_for;
 #[cfg(not(any(
-    target_os = "windows", target_os = "linux"
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "macos",
 )))] use unsupported::path_for;
 
 #[cfg(test)]
