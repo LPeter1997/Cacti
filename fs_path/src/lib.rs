@@ -154,8 +154,8 @@ mod linux {
     use super::*;
 
     pub fn path_for(file: &File) -> Result<PathBuf> {
-        let id = file.as_raw_fd();
-        let symlink = format!("/proc/self/fd/{}", id);
+        let fd = file.as_raw_fd();
+        let symlink = format!("/proc/self/fd/{}", fd);
         fs::read_link(&symlink)
     }
 }
@@ -164,7 +164,14 @@ mod linux {
 
 #[cfg(target_os = "macos")]
 mod macos {
+    use std::ffi::OsString;
+    use std::os::unix::io::AsRawFd;
+    use std::os::unix::ffi::OsStringExt;
+    use std::io::{Error, ErrorKind};
     use super::*;
+
+    const PATH_MAX: i32 = 4096;
+    const F_GETPATH: i32 = 50;
 
     #[link(name = "c")]
     extern "C" {
@@ -172,7 +179,20 @@ mod macos {
     }
 
     pub fn path_for(file: &File) -> Result<PathBuf> {
-        unimplemented!()
+        let fd = file.as_raw_fd();
+        let mut buffer = vec![0u8; PATH_MAX as usize + 1];
+        let err = unsafe { fcntl(fd, F_GETPATH, buffer.as_mut_ptr()) };
+        if err < 0 {
+            return Err(Error::last_os_error());
+        }
+        // Find null-terminator
+        let null_term = buffer.iter().position(|c| *c == 0);
+        if null_term.is_none() {
+            return Err(Error::new(ErrorKind::InvalidData,
+                "No null-terminator in returned string!"));
+        }
+        buffer.drain(null_term.unwrap()..);
+        return Ok(OsString::from_vec(buffer).into())
     }
 }
 
