@@ -148,7 +148,7 @@ mod win32 {
 // Unix implementation /////////////////////////////////////////////////////////
 
 #[cfg(target_family = "unix")]
-mod unix {
+mod linux {
     use std::os::unix::io::AsRawFd;
     use std::fs;
     use super::*;
@@ -163,9 +163,9 @@ mod unix {
 // Choosing the right implementation based on platform.
 
 #[cfg(target_os = "windows")] use win32::path_for;
-#[cfg(target_family = "unix")] use unix::path_for;
+#[cfg(target_os = "linux")] use linux::path_for;
 #[cfg(not(any(
-    target_os = "windows", target_family = "unix"
+    target_os = "windows", target_os = "linux"
 )))] use unsupported::path_for;
 
 #[cfg(test)]
