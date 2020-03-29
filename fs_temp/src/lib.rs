@@ -55,21 +55,21 @@
 //!         /// the platform.
 //!         fn temp_path() -> Result<PathBuf> {
 //!             // ...
-//! # Ok(PathBuf::new())
+//! # unimplemented!()
 //!         }
 //!
 //!         /// Here you should create a file at the given path and return a
 //!         /// handle that deletes it when dropped.
 //!         fn temp_file(path: &Path) -> Result<fs::File> {
 //!             // ...
-//! # Err(std::io::Error::new(std::io::ErrorKind::Other, ""))
+//! # unimplemented!()
 //!         }
 //!
 //!         /// Here you should create a directory at the given path and return
 //!         /// the defined handle deletes it when dropped.
 //!         fn temp_dir(path: &Path) -> Result<Self::Directory> {
 //!             // ...
-//! # Err(std::io::Error::new(std::io::ErrorKind::Other, ""))
+//! # unimplemented!()
 //!         }
 //!
 //!         /// Here you should provide a strategy to search for a unique path
@@ -81,7 +81,7 @@
 //!         /// things thread-safe.
 //!         fn unique_path_in(root: &Path, extension: Option<&str>) -> Result<PathBuf> {
 //!             // ...
-//! # Ok(PathBuf::new())
+//! # unimplemented!()
 //!         }
 //!     }
 //!
@@ -89,6 +89,15 @@
 //!     /// directory, when dropped.
 //!     #[derive(Debug)]
 //!     struct MyDirectory { /* .. */ }
+//!
+//!     impl MyDirectory {
+//!         /// Your directory handle must define a `path` method that returns
+//!         /// the `&Path` of the represented directory.
+//!         fn path(&self) -> &Path {
+//!             // ...
+//! # unimplemented!()
+//!         }
+//!     }
 //! }
 //!
 //! #[cfg(target_os = "new_platform")] type FsTempImpl = my_platform::MyPlatformTemp;
@@ -391,7 +400,50 @@ fn unique_path_with_timestamp(root: &Path, extension: Option<&str>, extra: u64) 
 
 // Unsupported implementation //////////////////////////////////////////////////
 
-// TODO
+mod unsupported {
+    #![allow(dead_code)]
+
+    use std::io::{Error, ErrorKind};
+    use super::*;
+
+    struct UnsupportedTemp(()); // Tag it so it's not instantiatable
+
+    impl FsTemp for UnsupportedTemp {
+        type Directory = UnsupportedDirectory;
+
+        fn temp_path() -> Result<PathBuf> {
+            Err(Error::new(ErrorKind::Other,
+                "Temporary file paths are not supported on this platform!"))
+        }
+
+        fn temp_file(_path: &Path) -> Result<fs::File> {
+            Err(Error::new(ErrorKind::Other,
+                "Temporary files are not supported on this platform!"))
+        }
+
+        /// Creates a directory handle at the given path that automatically gets
+        /// deleted, when closed.
+        fn temp_dir(_path: &Path) -> Result<Self::Directory> {
+            Err(Error::new(ErrorKind::Other,
+                "Temporary directories are not supported on this platform!"))
+        }
+
+        /// The default unique file/directory name searching strategy for the
+        /// platform. Tries to search a unique file or directory name in the given
+        /// root directory, with a given an optional extension.
+        fn unique_path_in(_root: &Path, _extension: Option<&str>) -> Result<PathBuf> {
+            Err(Error::new(ErrorKind::Other,
+                "Unique paths are not supported on this platform!"))
+        }
+    }
+
+    #[derive(Debug)]
+    struct UnsupportedDirectory(()); // Tag it so it's not instantiatable
+
+    impl UnsupportedDirectory {
+        fn path(&self) -> &Path { unimplemented!() }
+    }
+}
 
 // WinAPI implementation ///////////////////////////////////////////////////////
 
@@ -455,7 +507,7 @@ mod win32 {
     }
 
     /// The Win32 implementation of the library.
-    pub struct WinApiTemp;
+    pub struct WinApiTemp(()); // Tag it so it's not instantiatable
 
     impl FsTemp for WinApiTemp {
         type Directory = WinApiDirectory;
@@ -555,6 +607,7 @@ mod win32 {
 // Choosing the right implementation based on platform.
 
 #[cfg(target_os = "windows")] type FsTempImpl = win32::WinApiTemp;
+#[cfg(not(target_os = "windows"))] type FsTempImpl = unsupported::UnsupportedTemp;
 
 #[cfg(test)]
 mod tests {
