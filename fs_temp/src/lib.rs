@@ -406,7 +406,7 @@ mod unsupported {
     use std::io::{Error, ErrorKind};
     use super::*;
 
-    struct UnsupportedTemp(()); // Tag it so it's not instantiatable
+    pub struct UnsupportedTemp(()); // Tag it so it's not instantiatable
 
     impl FsTemp for UnsupportedTemp {
         type Directory = UnsupportedDirectory;
@@ -438,7 +438,7 @@ mod unsupported {
     }
 
     #[derive(Debug)]
-    struct UnsupportedDirectory(()); // Tag it so it's not instantiatable
+    pub struct UnsupportedDirectory(()); // Tag it so it's not instantiatable
 
     impl UnsupportedDirectory {
         fn path(&self) -> &Path { unimplemented!() }
