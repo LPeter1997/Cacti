@@ -441,7 +441,7 @@ mod unsupported {
     pub struct UnsupportedDirectory(()); // Tag it so it's not instantiatable
 
     impl UnsupportedDirectory {
-        fn path(&self) -> &Path { unimplemented!() }
+        pub fn path(&self) -> &Path { unimplemented!() }
     }
 }
 
