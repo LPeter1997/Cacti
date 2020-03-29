@@ -224,11 +224,11 @@ mod tests {
 
     #[test]
     fn test_path() -> Result<()> {
-        // TODO: This is kinda bad, locally creates a file
+        // NOTE: This is kinda bad, locally creates a file
         let name = PathBuf::from("fs_path_testing.txt");
         let file = File::create(&name)?;
         let _del = DelFile(name.clone());
-        assert_eq!(file.path()?.file_name(), Some(name.as_os_str()));
+        assert!(file.path()?.ends_with(name));
         Ok(())
     }
 }
