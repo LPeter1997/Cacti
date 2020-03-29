@@ -31,10 +31,9 @@
 //! platform:
 //!
 //! ```no_run
-//! use std::io::Result;
-//! use std::path::PathBuf;
-//! use std::fs::File;
-//!
+//! # use std::io::Result;
+//! # use std::path::PathBuf;
+//! # use std::fs::File;
 //! fn path_for(handle: &File) -> Result<PathBuf> {
 //!     // ...
 //! # Ok(PathBuf::new())
@@ -122,6 +121,7 @@ mod win32 {
 
     pub fn path_for(file: &File) -> Result<PathBuf> {
         let handle = file.as_raw_handle();
+        // Ask for the buffer size
         let required_size = unsafe { GetFinalPathNameByHandleW(
             handle,
             ptr::null_mut(),
@@ -130,7 +130,9 @@ mod win32 {
         if required_size == 0 {
             return Err(std::io::Error::last_os_error());
         }
+        // Allocate
         let mut buffer = vec![0u16; required_size as usize];
+        // Fill
         let written_size = unsafe { GetFinalPathNameByHandleW(
             handle,
             buffer.as_mut_ptr(),

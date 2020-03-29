@@ -1,7 +1,7 @@
-//! A minimalistic, dependency-free, cross-platform library for generating
-//! temporary paths, files and directories.
+//! Cross-platform utility for generating unique temporary paths, files and
+//! directories.
 //!
-//! The whole library consists of 6 functions and a single type:
+//! The whole library consists of a handful of functions and a single type:
 //!  * [path](fn.path.html): Returns a unique path for temporaries.
 //!  * [path_in](fn.path_in.html): Returns a unique path in a given root
 //! directory for temporaries.
@@ -9,32 +9,93 @@
 //! it's handle is dropped.
 //!  * [file_in](fn.file_in.html): Creates a temporary file in a given root
 //! directory that gets deleted, when it's handle is dropped.
+//!  * [file_at](fn.file_at.html): Creates a temporary file at the given path
+//! that gets deleted, when it's handle is dropped.
 //!  * [directory](fn.directory.html): Creates a temporary directory that gets
 //! deleted, when it's handle is dropped.
 //!  * [directory_in](fn.directory_in.html): Creates a temporary directory in a
 //! given root directory that gets deleted with all it's contents, when it's
 //! handle is dropped.
-//!  * [Directory](type.Directory.html): Represents a directory handle that
+//!  * [directory_at](fn.directory_at.html): Creates a temporary directory at
+//! the given path that gets deleted with all it's contents, when it's handle is
+//! dropped.
+//!  * [Directory](struct.Directory.html): Represents a directory handle that
 //! deletes it's associated directory and all of it's contents, when dropped.
+//!
+//! # Usage
+//!
+//! For detailed usage, read the documentation of the individual functions.
 //!
 //! # Porting the library to other platforms
 //!
-//! To port the library to other platforms, take a look at `trait FsTemp`, which
-//! only requires the implementation of 2 (and another optional) function:
-//!  * `tmp_path`: To return a default temporary directory for the current
-//! platform.
-//!  * `file_handle`: To create a file handle at a given path, that gets cleaned
-//! up by the OS, when the handle is dropped.
-//!  * (optional) `unique_in`: To search for a unique dile or directory name
-//! inside a given root directory. The default implementation just calls
-//! `generate_unique_path`.
+//! To port this library to other platforms, the `trait FsTemp` has to be
+//! implemented for a type and have it aliased as `FsTempImpl` in global scope
+//! for the platform:
 //!
-//! The implemented type should be aliased as `FsTempImpl` on the appropriate
-//! platform.
+//! ```no_run
+//! # use std::io::Result;
+//! # use std::path::{Path, PathBuf};
+//! # use std::fs;
+//! # trait FsTemp {
+//! #    type Directory: std::fmt::Debug;
+//! #    fn temp_path() -> Result<PathBuf>;
+//! #    fn temp_file(path: &Path) -> Result<fs::File>;
+//! #    fn temp_dir(path: &Path) -> Result<Self::Directory>;
+//! #    fn unique_path_in(root: &Path, extension: Option<&str>) -> Result<PathBuf>;
+//! # }
+//! #[cfg(target_os = "new_platform")]
+//! mod my_platform {
+//!     struct MyPlatformTemp;
+//!
+//!     impl FsTemp for MyPlatformTemp {
+//!         /// The internal directory handle for this platform.
+//!         type Directory = MyDirectory;
+//!
+//!         /// Here you need to return some safe temporary directory path for
+//!         /// the platform.
+//!         fn temp_path() -> Result<PathBuf> {
+//!             // ...
+//! # Ok(PathBuf::new())
+//!         }
+//!
+//!         /// Here you should create a file at the given path and return a
+//!         /// handle that deletes it when dropped.
+//!         fn temp_file(path: &Path) -> Result<fs::File> {
+//!             // ...
+//! # Err(std::io::Error::new(std::io::ErrorKind::Other, ""))
+//!         }
+//!
+//!         /// Here you should create a directory at the given path and return
+//!         /// the defined handle deletes it when dropped.
+//!         fn temp_dir(path: &Path) -> Result<Self::Directory> {
+//!             // ...
+//! # Err(std::io::Error::new(std::io::ErrorKind::Other, ""))
+//!         }
+//!
+//!         /// Here you should provide a strategy to search for a unique path
+//!         /// inside the given root and with the given optional extension.
+//!         ///
+//!         /// You can use the general `unique_path_with_timestamp` strategy,
+//!         /// that uses a timestamp. If you use that, make sure to pass in
+//!         /// some unique thread identifier as the `extra` parameter, to keep
+//!         /// things thread-safe.
+//!         fn unique_path_in(root: &Path, extension: Option<&str>) -> Result<PathBuf> {
+//!             // ...
+//! # Ok(PathBuf::new())
+//!         }
+//!     }
+//!
+//!     /// Must implement std::fmt::Debug, also must delete the associated
+//!     /// directory, when dropped.
+//!     #[derive(Debug)]
+//!     struct MyDirectory { /* .. */ }
+//! }
+//!
+//! #[cfg(target_os = "new_platform")] type FsTempImpl = my_platform::MyPlatformTemp;
+//! ```
 
 use std::io::Result;
 use std::path::{Path, PathBuf};
-use std::fs::File;
 use std::fs;
 
 // ////////////////////////////////////////////////////////////////////////// //
@@ -45,10 +106,10 @@ use std::fs;
 /// at. An optional extension can be supplied - without the dot. The parent
 /// directory of the returned path is guaranteed to exist.
 ///
-/// Note, that the function doesn't actually create the directory or file, see
+/// **Note:** The function doesn't actually create the directory or file, see
 /// [directory](fn.directory.html) and [file](fn.file.html) for such
-/// functionality, which also automatically clean up the created directories and
-/// files.
+/// functionality. There are more differences than just calling
+/// `fs::create_dir(path(...))`.
 ///
 /// # Examples
 ///
@@ -77,8 +138,11 @@ use std::fs;
 /// # Ok(())
 /// # }
 /// ```
+///
+/// Please note, that neither of the examples clean up the created files and
+/// directories.
 pub fn path(extension: Option<&str>) -> Result<PathBuf> {
-    path_in(&FsTempImpl::tmp_path()?, extension)
+    path_in(&FsTempImpl::temp_path()?, extension)
 }
 
 /// Tries to find a path inside the given root directory that's usable to create
@@ -86,10 +150,10 @@ pub fn path(extension: Option<&str>) -> Result<PathBuf> {
 /// without the dot. The parent of the returned path is guaranteed to be the
 /// given root directory.
 ///
-/// Note, that the function doesn't actually create the directory or file, see
-/// [directory](fn.directory.html) and [file](fn.file.html) for such
-/// functionality, which also automatically clean up the created directories and
-/// files.
+/// **Note:** The function doesn't actually create the directory or file, see
+/// [directory_in](fn.directory_in.html) and [file_in](fn.file_in.html) for such
+/// functionality. There are more differences than just calling
+/// `fs::create_dir(path_in(...))`.
 ///
 /// # Examples
 ///
@@ -118,13 +182,16 @@ pub fn path(extension: Option<&str>) -> Result<PathBuf> {
 /// # Ok(())
 /// # }
 /// ```
+///
+/// Please note, that neither of the examples clean up the created files and
+/// directories.
 pub fn path_in(root: impl AsRef<Path>, extension: Option<&str>) -> Result<PathBuf> {
-    FsTempImpl::unique_in(root.as_ref(), extension)
+    FsTempImpl::unique_path_in(root.as_ref(), extension)
 }
 
-/// Tries to create a temporary file, returning it's handle. An optional
-/// extension can be supplied - without the dot. When the returned handle gets
-/// dropped, the file is deleted.
+/// Tries to create a temporary file at some default place, returning it's
+/// handle. An optional extension can be supplied - without the dot. When the
+/// returned handle gets dropped, the file is deleted.
 ///
 /// # Examples
 ///
@@ -140,8 +207,8 @@ pub fn path_in(root: impl AsRef<Path>, extension: Option<&str>) -> Result<PathBu
 /// # Ok(())
 /// # }
 /// ```
-pub fn file(extension: Option<&str>) -> Result<File> {
-    FsTempImpl::file_handle(&path(extension)?)
+pub fn file(extension: Option<&str>) -> Result<fs::File> {
+    file_in(&FsTempImpl::temp_path()?, extension)
 }
 
 /// Tries to create a temporary file inside the given root directory, returning
@@ -163,13 +230,37 @@ pub fn file(extension: Option<&str>) -> Result<File> {
 /// # Ok(())
 /// # }
 /// ```
-pub fn file_in(root: impl AsRef<Path>, extension: Option<&str>) -> Result<File> {
-    FsTempImpl::file_handle(&path_in(root, extension)?)
+pub fn file_in(root: impl AsRef<Path>, extension: Option<&str>) -> Result<fs::File> {
+    file_at(&path_in(root, extension)?)
 }
 
-/// Tries to create a temporary directory, returning it's handle. When the
-/// returned handle gets dropped, the directory and all of it's contents are
-/// deleted.
+/// Tries to create a temporary file at the exact path. When the returned handle
+/// gets dropped, the file is deleted.
+///
+/// # Examples
+///
+/// Creating a temporary TXT file named `test.txt`:
+///
+/// ```no_run
+/// use std::io::Write;
+///
+/// # fn main() -> std::io::Result<()> {
+/// {
+///     let mut file = fs_temp::file_at("test.txt")?;
+///     // Now we can write to the file!
+///     file.write_all("Hello, World!".as_bytes())?;
+/// }
+/// // Here the file is deleted!
+/// # Ok(())
+/// # }
+/// ```
+pub fn file_at(full_path: impl AsRef<Path>) -> Result<fs::File> {
+    FsTempImpl::temp_file(full_path.as_ref())
+}
+
+/// Tries to create a temporary directory at some default place, returning it's
+/// handle. When the returned handle gets dropped, the directory and all of it's
+/// contents are deleted.
 ///
 /// # Examples
 ///
@@ -183,13 +274,12 @@ pub fn file_in(root: impl AsRef<Path>, extension: Option<&str>) -> Result<File> 
 /// # }
 /// ```
 pub fn directory() -> Result<Directory> {
-    directory_in(&FsTempImpl::tmp_path()?)
+    directory_in(&FsTempImpl::temp_path()?)
 }
 
 /// Tries to create a temporary directory inside the given root directory,
 /// returning it's handle. When the returned handle gets dropped, the directory
-/// and all of it's contents are deleted. The created directory is guaranteed to
-/// be directly inside the given root directory.
+/// and all of it's contents are deleted.
 ///
 /// # Examples
 ///
@@ -203,27 +293,38 @@ pub fn directory() -> Result<Directory> {
 /// # }
 /// ```
 pub fn directory_in(root: impl AsRef<Path>) -> Result<Directory> {
-    let path = path_in(root, None)?;
-    fs::create_dir(&path)?;
-    Ok(Directory{ path })
+    directory_at(&path_in(root, None)?)
 }
 
-/// Represents a directory handle, that deletes it's associated directory and
-/// all of it's contents, when the handle gets dropped.
-#[derive(Debug)]
-pub struct Directory {
-    path: PathBuf,
+/// Tries to create a temporary directory at the exact path. When the returned
+/// handle gets dropped, the directory and all of it's contents are deleted.
+///
+/// # Examples
+///
+/// Creating a temporary directory named `cache`:
+///
+/// ```no_run
+/// # fn main() -> std::io::Result<()> {
+/// {
+///     let dir = fs_temp::directory_at("cache")?;
+///     // We can work inside the directory now!
+/// }
+/// // Here the directory is deleted!
+/// # Ok(())
+/// # }
+/// ```
+pub fn directory_at(full_path: impl AsRef<Path>) -> Result<Directory> {
+    Ok(Directory(FsTempImpl::temp_dir(full_path.as_ref())?))
 }
+
+/// Represents a handle for a directory created by one of the directory
+/// functions.
+#[derive(Debug)]
+pub struct Directory(<FsTempImpl as FsTemp>::Directory);
 
 impl Directory {
-    /// Returns the path of this directory.
-    pub fn path(&self) -> &Path { &self.path }
-}
-
-impl Drop for Directory {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
+    /// Returns the path of this directory handle.
+    pub fn path(&self) -> &Path { self.0.path() }
 }
 
 // ////////////////////////////////////////////////////////////////////////// //
@@ -232,22 +333,28 @@ impl Drop for Directory {
 
 /// The functionality every platform must implement.
 trait FsTemp {
-    /// Returns a default temporary path for the given platform.
-    fn tmp_path() -> Result<PathBuf>;
+    /// The type of the directory handle this platform provides.
+    type Directory: std::fmt::Debug;
 
-    /// Creates a file handle that automatically gets deleted when closed.
-    fn file_handle(path: &Path) -> Result<File>;
+    /// Returns a default temporary path for the given platform.
+    fn temp_path() -> Result<PathBuf>;
+
+    /// Creates a file handle at the given path that automatically gets deleted,
+    /// when closed.
+    fn temp_file(path: &Path) -> Result<fs::File>;
+
+    /// Creates a directory handle at the given path that automatically gets
+    /// deleted, when closed.
+    fn temp_dir(path: &Path) -> Result<Self::Directory>;
 
     /// The default unique file/directory name searching strategy for the
-    /// platform.
-    fn unique_in(root: &Path, extension: Option<&str>) -> Result<PathBuf> {
-        generate_unique_path(root, extension)
-    }
+    /// platform. Tries to search a unique file or directory name in the given
+    /// root directory, with a given an optional extension.
+    fn unique_path_in(root: &Path, extension: Option<&str>) -> Result<PathBuf>;
 }
 
-/// A general strategy to find a unique directory or file name in the given
-/// root directory.
-fn generate_unique_path(root: &Path, extension: Option<&str>) -> Result<PathBuf> {
+// A general, timestamp-based unique path-finder.
+fn unique_path_with_timestamp(root: &Path, extension: Option<&str>, extra: u64) -> Result<PathBuf> {
     use std::io::{Error, ErrorKind};
     use std::time::SystemTime;
 
@@ -263,7 +370,7 @@ fn generate_unique_path(root: &Path, extension: Option<&str>) -> Result<PathBuf>
         let timestamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
         // Construct prefix
-        let prefix = format!("tmp_{}_", timestamp);
+        let prefix = format!("tmp_{}_{}_", timestamp, extra);
 
         for i in 0..ITER_COUNT {
             // Construct the full last part
@@ -282,19 +389,22 @@ fn generate_unique_path(root: &Path, extension: Option<&str>) -> Result<PathBuf>
         format!("Could not find unique path in '{:?}'!", root)))
 }
 
+// Unsupported implementation //////////////////////////////////////////////////
+
+// TODO
+
 // WinAPI implementation ///////////////////////////////////////////////////////
 
 #[cfg(target_os = "windows")]
 mod win32 {
     #![allow(non_snake_case)]
 
-    use std::ffi::OsString;
-    use std::os::windows::ffi::OsStringExt;
-    use std::fs::OpenOptions;
-    use std::os::windows::fs::OpenOptionsExt;
+    use std::ffi::{OsStr, OsString, c_void};
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use std::os::windows::io::FromRawHandle;
     use std::path::{Path, PathBuf};
-    use std::mem::MaybeUninit;
-    use std::slice;
+    use std::ptr;
+    use std::io;
     use super::*;
 
     // Access constants
@@ -302,9 +412,15 @@ mod win32 {
     const GENERIC_WRITE: u32 = 0x40000000;
     // Share constants
     const FILE_SHARE_DELETE: u32 = 0x00000004;
+    // Creation and disposition
+    const CREATE_NEW   : u32 = 1;
+    const OPEN_EXISTING: u32 = 3;
     // Flags and attributes
-    const FILE_ATTRIBUTE_TEMPORARY : u32 = 0x00000100;
-    const FILE_FLAG_DELETE_ON_CLOSE: u32 = 0x04000000;
+    const FILE_ATTRIBUTE_TEMPORARY  : u32 = 0x00000100;
+    const FILE_FLAG_DELETE_ON_CLOSE : u32 = 0x04000000;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x02000000;
+    // Returned by handle-returning functions on failure
+    const INVALID_HANDLE_VALUE: *mut c_void = -1isize as *mut c_void;
 
     #[link(name = "kernel32")]
     extern "system" {
@@ -312,41 +428,127 @@ mod win32 {
             buffer_len: u32     ,
             buffer    : *mut u16,
         ) -> u32;
+
+        fn CreateFileW(
+            name     : *const u16 ,
+            access   : u32        ,
+            share    : u32        ,
+            security : *mut c_void,
+            crea_disp: u32        ,
+            attribs  : u32        ,
+            template : *mut c_void,
+        ) -> *mut c_void;
+
+        fn CreateDirectoryW(
+            name    : *const u16 ,
+            security: *mut c_void,
+        ) -> i32;
+
+        fn CloseHandle(handle: *mut c_void) -> i32;
+
+        fn GetCurrentThreadId() -> u32;
+    }
+
+    /// Converts the Rust &OsStr into a WinAPI `WCHAR` string.
+    fn to_wstring(s: &OsStr) -> Vec<u16> {
+        s.encode_wide().chain(Some(0).into_iter()).collect()
     }
 
     /// The Win32 implementation of the library.
     pub struct WinApiTemp;
 
     impl FsTemp for WinApiTemp {
-        fn tmp_path() -> Result<PathBuf> {
-            const BUFFER_SIZE: usize = 261;
+        type Directory = WinApiDirectory;
 
-            let mut buffer: MaybeUninit<[u16; BUFFER_SIZE]> = MaybeUninit::uninit();
-            let filled = unsafe { GetTempPathW(
-                BUFFER_SIZE as u32,
-                buffer.as_mut_ptr().cast()) };
-
-            if filled == 0 {
-                Err(std::io::Error::last_os_error())
+        fn temp_path() -> Result<PathBuf> {
+            // Ask for the buffer size
+            let required_size = unsafe { GetTempPathW(
+                0,
+                ptr::null_mut()) };
+            if required_size == 0 {
+                return Err(io::Error::last_os_error());
             }
-            else {
-                let buffer: &[u16] = unsafe { slice::from_raw_parts(
-                    buffer.as_ptr().cast(),
-                    filled as usize) };
-                Ok(OsString::from_wide(buffer).into())
+            // Allocate
+            let mut buffer = vec![0u16; required_size as usize];
+            // Fill
+            let written_size = unsafe { GetTempPathW(
+                required_size,
+                buffer.as_mut_ptr()) };
+            if written_size == 0 || written_size > required_size {
+                return Err(io::Error::last_os_error());
             }
+            // Remove 0-terminator
+            let buffer = &buffer[..(written_size as usize)];
+            Ok(OsString::from_wide(buffer).into())
         }
 
-        fn file_handle(path: &Path) -> Result<File> {
-            OpenOptions::new()
-                .create_new(true)
-                .read(true).write(true)
-                .access_mode(GENERIC_READ | GENERIC_WRITE)
-                .share_mode(FILE_SHARE_DELETE)
-                .attributes(FILE_ATTRIBUTE_TEMPORARY)
-                .custom_flags(FILE_FLAG_DELETE_ON_CLOSE)
-                .open(path)
+        fn temp_file(path: &Path) -> Result<fs::File> {
+            let path = to_wstring(path.as_os_str());
+            let handle = unsafe { CreateFileW(
+                path.as_ptr(),
+                GENERIC_READ | GENERIC_WRITE,
+                FILE_SHARE_DELETE,
+                ptr::null_mut(),
+                CREATE_NEW,
+                FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
+                ptr::null_mut()) };
+            if handle == INVALID_HANDLE_VALUE {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(unsafe{ fs::File::from_raw_handle(handle) })
         }
+
+        fn temp_dir(path: &Path) -> Result<Self::Directory> {
+            // First create the path
+            let wpath = to_wstring(path.as_os_str());
+            let result = unsafe { CreateDirectoryW(
+                wpath.as_ptr(),
+                ptr::null_mut()) };
+            if result == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            // Now the trickery, open with `CreateFileW` so the OS can delete it
+            // even when the program gets interrupted
+            let handle = unsafe { CreateFileW(
+                wpath.as_ptr(),
+                GENERIC_READ | GENERIC_WRITE,
+                FILE_SHARE_DELETE,
+                ptr::null_mut(),
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE | FILE_FLAG_BACKUP_SEMANTICS,
+                ptr::null_mut()) };
+            if handle == INVALID_HANDLE_VALUE {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(WinApiDirectory{ handle, path: path.to_path_buf() })
+        }
+
+        fn unique_path_in(root: &Path, extension: Option<&str>) -> Result<PathBuf> {
+            // For now we default to the generic one, appending thread-id
+            let extra = unsafe{ GetCurrentThreadId() };
+            unique_path_with_timestamp(root, extension, extra as u64)
+        }
+    }
+
+    /// Win32 directory handle type.
+    #[derive(Debug)]
+    pub struct WinApiDirectory {
+        handle: *mut c_void,
+        path: PathBuf,
+    }
+
+    impl Drop for WinApiDirectory {
+        fn drop(&mut self) {
+            if self.handle == INVALID_HANDLE_VALUE {
+                return;
+            }
+            unsafe { CloseHandle(self.handle) };
+            self.handle = INVALID_HANDLE_VALUE;
+        }
+    }
+
+    impl WinApiDirectory {
+        pub fn path(&self) -> &Path { &self.path }
     }
 }
 
