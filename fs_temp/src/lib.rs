@@ -612,6 +612,7 @@ mod win32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fs_path::FilePath;
     use std::ffi::OsString;
 
     #[test]
@@ -652,26 +653,32 @@ mod tests {
     #[test]
     fn test_file() -> Result<()> {
         // NOTE: We can't get file path
+        let path;
         {
-            let _f = file(Some("txt"))?;
+            let file = file(Some("txt"))?;
+            path = file.path()?;
+            assert!(path.exists());
+            assert!(path.extension() == Some(&OsString::from("txt")));
         }
-        // NOTE: We can't detect if it was deleted
+        assert!(!path.exists());
         Ok(())
     }
 
     // NOTE: Test file_in?
+    // NOTE: Test file_at?
 
     #[test]
     fn test_directory() -> Result<()> {
-        let mut dpath = None;
+        let path;
         {
-            let d = directory()?;
-            dpath = Some(d.path().to_path_buf());
-            assert!(dpath.as_ref().unwrap().exists());
+            let dir = directory()?;
+            path = dir.path().to_path_buf();
+            assert!(path.exists());
         }
-        assert!(!dpath.unwrap().exists());
+        assert!(!path.exists());
         Ok(())
     }
 
     // NOTE: Test directory_in?
+    // NOTE: Test directory_at?
 }
