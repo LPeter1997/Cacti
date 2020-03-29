@@ -27,5 +27,7 @@ matrix:
 script:
   - cargo build --package fs_path --verbose
   - cargo test --package fs_path --verbose
+  - cargo build --package fs_temp --verbose
+  - cargo test --package fs_temp --verbose
   # - cargo build --package fs_path --verbose --all
   # - cargo test --package fs_path --verbose --all
