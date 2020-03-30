@@ -622,7 +622,7 @@ mod unix {
 
     /// Converts the Rust &OsStr into a C conar*.
     fn to_cstring(s: &OsStr) -> Vec<u8> {
-        s.as_bytes().iter().chain(Some(0).into_iter()).collect()
+        s.as_bytes().iter().cloned().chain(Some(0).into_iter()).collect()
     }
 
     /// `trait FsTemp` on Unix systems.
