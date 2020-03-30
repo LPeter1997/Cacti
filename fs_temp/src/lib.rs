@@ -649,7 +649,7 @@ mod unix {
             // NOTE: For now we default to this, this is a worse alternative to
             // the Windows one, but will do just fine for now
             fs::create_dir(path)?;
-            UnixDirectory(path.to_path_buf())
+            Ok(UnixDirectory(path.to_path_buf()))
         }
 
         fn unique_path_in(root: &Path, extension: Option<&str>) -> Result<PathBuf> {
