@@ -448,8 +448,9 @@ mod win32 {
 
 #[cfg(target_os = "linux")]
 mod linux {
+    use std::ffi::OsString;
     use std::os::unix::io::FromRawFd;
-    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::ffi::OsStringExt;
     use super::*;
 
     #[link(name = "c")]
@@ -476,9 +477,9 @@ mod linux {
             let suffix = extension.map(|e| format!(".{}", e)).unwrap_or_else(String::new);
             let last_part = format!("tmp_XXXXXX{}\0", suffix);
             path.push(last_part);
-            let bytes = path.as_os_str().as_bytes();
+            let mut path = path.into_os_string().into_vec();
             // Create
-            let fd = unsafe { mkstemps(bytes.as_mut_ptr(), suffix.len() as i32) };
+            let fd = unsafe { mkstemps(path.as_mut_ptr(), suffix.len() as i32) };
             if fd == -1 {
                 return Err(std::io::Error::last_os_error());
             }
