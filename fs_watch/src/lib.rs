@@ -760,91 +760,19 @@ mod tests {
 
     #[test]
     fn test_poll_watch_recursive_create_modify_delete() -> Result<()> {
-        let dir = fs_temp::directory()?;
-        let mut w = PollWatch::new()?;
-        let dir_canon = fs::canonicalize(dir.path())?;
-        w.watch(&dir_canon, Recursion::Recursive)?;
-        w.set_interval(Duration::from_millis(0));
+        let d = fs::create_dir("./test");
+        let mt = fs::metadata("./test")?.modified()?;
+        println!("Modified: {:?}", mt);
 
-        println!("STAGE 1");
-
-        assert!(w.poll_event().is_none());
-
-        println!("STAGE 2");
-
-        let foo_path = cat_path(&dir_canon, "foo.txt");
-        println!("PATH {:?} MTIME: {:?}", dir_canon, fs::metadata(&dir_canon)?.modified());
-        println!("Foo path {:?}", foo_path);
-        // Create
+        thread::sleep(Duration::from_millis(500));
         {
-            {
-                let mut f = create_file_in(&dir_canon, "foo.txt")?;
-                f.write_all("Hello".as_bytes())?;
-                f.sync_all()?;
-            }
-            {
-                println!("PATH {:?} MTIME2: {:?}", dir_canon, fs::metadata(&dir_canon)?.modified());
-                println!("STAGE 3");
-                // An event for file creation
-                let e = w.poll_event().unwrap().unwrap();
-                assert_eq!(e.kind, EventKind::Create);
-                assert_eq!(
-                    fs::canonicalize(e.path)?,
-                    fs::canonicalize(&foo_path)?
-                );
-                // An event for directory modification
-                // TODO: This looks like not propagated event handling to me...
-                return Ok(());
-                let e = w.poll_event().unwrap().unwrap();
-                assert_eq!(e.kind, EventKind::Modify);
-                assert_eq!(
-                    fs::canonicalize(e.path)?,
-                    dir_canon
-                );
-                // No more
-                assert!(w.poll_event().is_none());
-            }
+            let f = fs::File::create("./test/foo.txt");
         }
-        // Modify
-        {
-            {
-                let mut f = create_file_in(dir.path(), "foo.txt")?;
-                f.write_all("Hello".as_bytes())?;
-            }
-            {
-                // An event for file modification
-                let e = w.poll_event().unwrap().unwrap();
-                assert_eq!(e.kind, EventKind::Modify);
-                assert_eq!(
-                    fs::canonicalize(e.path)?,
-                    fs::canonicalize(&foo_path)?
-                );
-                // No more
-                assert!(w.poll_event().is_none());
-            }
-        }
-        // Delete
-        {
-            {
-                fs::remove_file(&foo_path)?;
-            }
-            {
-                // An event for file delete
-                let e = w.poll_event().unwrap().unwrap();
-                assert_eq!(e.kind, EventKind::Delete);
-                // We can't canonicalize anymore
-                assert!(e.path.ends_with("foo.txt"));
-                // An event for directory modification
-                let e = w.poll_event().unwrap().unwrap();
-                assert_eq!(e.kind, EventKind::Modify);
-                assert_eq!(
-                    fs::canonicalize(e.path)?,
-                    fs::canonicalize(dir.path())?
-                );
-                // No more
-                assert!(w.poll_event().is_none());
-            }
-        }
+
+        let mt = fs::metadata("./test")?.modified()?;
+        println!("Modified: {:?}", mt);
+
+        fs::remove_dir_all("./test")?;
 
         Ok(())
     }

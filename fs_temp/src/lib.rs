@@ -667,7 +667,7 @@ mod unix {
 
     impl Drop for UnixDirectory {
         fn drop(&mut self) {
-            let _ = fs::remove_dir(&self.0);
+            let _ = fs::remove_dir_all(&self.0);
         }
     }
 
