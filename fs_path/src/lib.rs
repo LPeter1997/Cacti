@@ -68,6 +68,10 @@ pub trait FilePath {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// In case of an IO or system error, an error variant is returned.
     fn path(&self) -> Result<PathBuf>;
 }
 

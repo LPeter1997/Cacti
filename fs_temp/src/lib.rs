@@ -150,6 +150,10 @@ use std::fs;
 ///
 /// Please note, that neither of the examples clean up the created files and
 /// directories.
+///
+/// # Errors
+///
+/// In case of an IO or system error, an error variant is returned.
 pub fn path(extension: Option<&str>) -> Result<PathBuf> {
     path_in(&FsTempImpl::temp_path()?, extension)
 }
@@ -194,6 +198,10 @@ pub fn path(extension: Option<&str>) -> Result<PathBuf> {
 ///
 /// Please note, that neither of the examples clean up the created files and
 /// directories.
+///
+/// # Errors
+///
+/// In case of an IO or system error, an error variant is returned.
 pub fn path_in(root: impl AsRef<Path>, extension: Option<&str>) -> Result<PathBuf> {
     FsTempImpl::unique_path_in(root.as_ref(), extension)
 }
@@ -216,6 +224,10 @@ pub fn path_in(root: impl AsRef<Path>, extension: Option<&str>) -> Result<PathBu
 /// # Ok(())
 /// # }
 /// ```
+///
+/// # Errors
+///
+/// In case of an IO or system error, an error variant is returned.
 pub fn file(extension: Option<&str>) -> Result<fs::File> {
     file_in(&FsTempImpl::temp_path()?, extension)
 }
@@ -239,6 +251,10 @@ pub fn file(extension: Option<&str>) -> Result<fs::File> {
 /// # Ok(())
 /// # }
 /// ```
+///
+/// # Errors
+///
+/// In case of an IO or system error, an error variant is returned.
 pub fn file_in(root: impl AsRef<Path>, extension: Option<&str>) -> Result<fs::File> {
     file_at(&path_in(root, extension)?)
 }
@@ -263,6 +279,10 @@ pub fn file_in(root: impl AsRef<Path>, extension: Option<&str>) -> Result<fs::Fi
 /// # Ok(())
 /// # }
 /// ```
+///
+/// # Errors
+///
+/// In case of an IO or system error, an error variant is returned.
 pub fn file_at(full_path: impl AsRef<Path>) -> Result<fs::File> {
     FsTempImpl::temp_file(full_path.as_ref())
 }
@@ -282,6 +302,10 @@ pub fn file_at(full_path: impl AsRef<Path>) -> Result<fs::File> {
 /// # Ok(())
 /// # }
 /// ```
+///
+/// # Errors
+///
+/// In case of an IO or system error, an error variant is returned.
 pub fn directory() -> Result<Directory> {
     directory_in(&FsTempImpl::temp_path()?)
 }
@@ -301,6 +325,10 @@ pub fn directory() -> Result<Directory> {
 /// # Ok(())
 /// # }
 /// ```
+///
+/// # Errors
+///
+/// In case of an IO or system error, an error variant is returned.
 pub fn directory_in(root: impl AsRef<Path>) -> Result<Directory> {
     directory_at(&path_in(root, None)?)
 }
@@ -322,6 +350,10 @@ pub fn directory_in(root: impl AsRef<Path>) -> Result<Directory> {
 /// # Ok(())
 /// # }
 /// ```
+///
+/// # Errors
+///
+/// In case of an IO or system error, an error variant is returned.
 pub fn directory_at(full_path: impl AsRef<Path>) -> Result<Directory> {
     Ok(Directory(FsTempImpl::temp_dir(full_path.as_ref())?))
 }
