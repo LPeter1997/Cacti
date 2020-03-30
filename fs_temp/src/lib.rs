@@ -639,6 +639,7 @@ mod unix {
     }
 
     /// Unix directory handle type.
+    #[derive(Debug)]
     pub struct UnixDirectory;
 
     impl UnixDirectory {
