@@ -1,4 +1,12 @@
 //! Cross-platform utility for monitoring filesystem changes.
+//!
+//! # Usage
+//!
+//! TODO
+//!
+//! # Porting the library to other platforms
+//!
+//! TODO
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -716,6 +724,7 @@ mod win32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::thread;
     use std::io::Write;
 
     // TODO: Would make a nice macro
@@ -756,6 +765,7 @@ mod tests {
         // Create
         {
             { create_file_in(dir.path(), "foo.txt")?; }
+            thread::sleep(Duration::from_millis(5));
             {
                 // An event for file creation
                 let e = w.poll_event().unwrap().unwrap();
@@ -781,6 +791,7 @@ mod tests {
                 let mut f = create_file_in(dir.path(), "foo.txt")?;
                 f.write_all("Hello".as_bytes())?;
             }
+            thread::sleep(Duration::from_millis(5));
             {
                 // An event for file modification
                 let e = w.poll_event().unwrap().unwrap();
@@ -798,6 +809,7 @@ mod tests {
             {
                 fs::remove_file(&foo_path)?;
             }
+            thread::sleep(Duration::from_millis(5));
             {
                 // An event for file delete
                 let e = w.poll_event().unwrap().unwrap();
