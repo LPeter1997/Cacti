@@ -363,7 +363,9 @@ trait FsTemp {
 }
 
 // A general, timestamp-based unique path-finder.
-fn unique_path_with_timestamp(root: &Path, extension: Option<&str>, extra: u64) -> Result<PathBuf> {
+fn unique_path_with_timestamp<E>(root: &Path, extension: Option<&str>, extra: E) -> Result<PathBuf>
+    where E: std::fmt::Display {
+
     use std::io::{Error, ErrorKind};
     use std::time::SystemTime;
 
@@ -578,7 +580,7 @@ mod win32 {
         fn unique_path_in(root: &Path, extension: Option<&str>) -> Result<PathBuf> {
             // For now we default to the generic one, appending thread-id
             let extra = unsafe{ GetCurrentThreadId() };
-            unique_path_with_timestamp(root, extension, extra as u64)
+            unique_path_with_timestamp(root, extension, extra)
         }
     }
 
@@ -612,7 +614,7 @@ mod unix {
 
     #[link(name = "c")]
     extern "C" {
-
+        fn getpid() -> i32;
     }
 
     /// `trait FsTemp` on Unix systems.
@@ -622,7 +624,7 @@ mod unix {
         type Directory = UnixDirectory;
 
         fn temp_path() -> Result<PathBuf> {
-            panic!("TODO UNIX")
+            Ok(PathBuf::from("/tmp"))
         }
 
         fn temp_file(path: &Path) -> Result<fs::File> {
@@ -634,7 +636,9 @@ mod unix {
         }
 
         fn unique_path_in(root: &Path, extension: Option<&str>) -> Result<PathBuf> {
-            panic!("TODO UNIX")
+            // For now we default to the generic one, appending thread-id
+            let extra = unsafe{ getpid() };
+            unique_path_with_timestamp(root, extension, extra)
         }
     }
 
