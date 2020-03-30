@@ -676,7 +676,23 @@ mod tests {
         Ok(())
     }
 
-    // NOTE: Test file_in?
+    #[test]
+    fn test_file_in() -> Result<()> {
+        let path;
+        {
+            let dir = file_in(".", Some("txt"))?;
+            path = dir.path()?;
+            assert_eq!(
+                fs::canonicalize(path.parent().unwrap())?,
+                fs::canonicalize(".")?
+            );
+            assert!(path.exists());
+            assert!(path.extension() == Some(&OsString::from("txt")));
+        }
+        assert!(!path.exists());
+        Ok(())
+    }
+
     // NOTE: Test file_at?
 
     #[test]
@@ -685,6 +701,22 @@ mod tests {
         {
             let dir = directory()?;
             path = dir.path().to_path_buf();
+            assert!(path.exists());
+        }
+        assert!(!path.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn test_directory_in() -> Result<()> {
+        let path;
+        {
+            let dir = directory_in(".")?;
+            path = dir.path().to_path_buf();
+            assert_eq!(
+                fs::canonicalize(path.parent().unwrap())?,
+                fs::canonicalize(".")?
+            );
             assert!(path.exists());
         }
         assert!(!path.exists());
