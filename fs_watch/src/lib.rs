@@ -797,7 +797,6 @@ mod tests {
                 );
                 // An event for directory modification
                 // TODO: This looks like not propagated event handling to me...
-                return Ok(());
                 let e = w.poll_event().unwrap().unwrap();
                 assert_eq!(e.kind, EventKind::Modify);
                 assert_eq!(
@@ -809,6 +808,7 @@ mod tests {
             }
         }
         // Modify
+        thread::sleep(Duration::from_millis(500));
         {
             {
                 let mut f = create_file_in(dir.path(), "foo.txt")?;
@@ -827,6 +827,7 @@ mod tests {
             }
         }
         // Delete
+        thread::sleep(Duration::from_millis(500));
         {
             {
                 fs::remove_file(&foo_path)?;
