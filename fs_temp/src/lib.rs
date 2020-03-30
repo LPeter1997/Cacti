@@ -678,13 +678,17 @@ mod unix {
 mod tests {
     use super::*;
     use fs_path::FilePath;
-    use std::ffi::OsString;
+    use std::ffi::{OsStr, OsString};
+
+    fn starts_with(s: &OsStr, pat: &str) -> bool {
+        s.to_str().unwrap().starts_with(pat)
+    }
 
     #[test]
     fn test_path() -> Result<()> {
         let path = path(None)?;
         assert!(!path.exists());
-        assert!(path.extension() == None);
+        assert_eq!(path.extension(), None);
         let parent = path.parent();
         assert!(parent.is_some());
         assert!(parent.unwrap().exists());
@@ -695,7 +699,7 @@ mod tests {
     fn test_path_with_extension() -> Result<()> {
         let path = path(Some("txt"))?;
         assert!(!path.exists());
-        assert!(path.extension() == Some(&OsString::from("txt")));
+        assert_eq!(path.extension().unwrap(), &OsString::from("txt"));
         let parent = path.parent();
         assert!(parent.is_some());
         assert!(parent.unwrap().exists());
@@ -706,7 +710,7 @@ mod tests {
     fn test_path_in() -> Result<()> {
         let path = path_in(".", None)?;
         assert!(!path.exists());
-        assert!(path.extension() == None);
+        assert_eq!(path.extension(), None);
         assert_eq!(
             fs::canonicalize(path.parent().unwrap())?,
             fs::canonicalize(".")?
@@ -721,7 +725,8 @@ mod tests {
             let file = file(Some("txt"))?;
             path = file.path()?;
             //assert!(path.exists()); // NOTE: Not true for unix probably
-            assert!(path.extension() == Some(&OsString::from("txt")));
+
+            assert!(starts_with(path.extension().unwrap(), "txt"));
         }
         assert!(!path.exists());
         Ok(())
@@ -738,7 +743,8 @@ mod tests {
                 fs::canonicalize(".")?
             );
             //assert!(path.exists()); // NOTE: Not true for unix probably
-            assert_eq!(path.extension().unwrap(), &OsString::from("txt"));
+
+            assert!(starts_with(path.extension().unwrap(), "txt"));
         }
         assert!(!path.exists());
         Ok(())
@@ -755,8 +761,9 @@ mod tests {
                 fs::canonicalize(".")?
             );
             //assert!(path.exists()); // NOTE: Not true for unix probably
-            assert_eq!(path.extension().unwrap(), &OsString::from("txt"));
-            assert_eq!(path.file_name().unwrap(), &OsString::from("hello.txt"));
+
+            assert!(starts_with(path.extension().unwrap(), "txt"));
+            assert!(starts_with(path.file_name().unwrap(), "hello.txt"));
         }
         assert!(!path.exists());
         Ok(())
