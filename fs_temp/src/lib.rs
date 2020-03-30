@@ -209,7 +209,8 @@ trait FsTemp {
     fn temp_dir_in(root: &Path) -> Result<Self::Directory>;
 }
 
-// A general, timestamp-based unique path-finder.
+/// A general, timestamp-based unique path-finder.
+#[allow(dead_code)]
 fn unique_path_with_timestamp(root: &Path, extra: u64, extension: Option<&str>) -> Result<PathBuf> {
     use std::io::{Error, ErrorKind};
     use std::time::SystemTime;
@@ -447,7 +448,17 @@ mod win32 {
 
 #[cfg(target_os = "linux")]
 mod linux {
+    use std::os::unix::io::FromRawFd;
+    use std::os::unix::ffi::OsStrExt;
     use super::*;
+
+    #[link(name = "c")]
+    extern "C" {
+        fn mkstemps(
+            template  : *mut u8,
+            suffix_len: i32    ,
+        ) -> i32;
+    }
 
     /// The Linux implementation of the `FsTemp` trait.
     pub struct LinuxTemp;
@@ -459,8 +470,19 @@ mod linux {
             Ok(PathBuf::from("/tmp"))
         }
 
-        fn temp_file_in(_root: &Path, _extension: Option<&str>) -> Result<fs::File> {
-            unimplemented!()
+        fn temp_file_in(root: &Path, extension: Option<&str>) -> Result<fs::File> {
+            // Build a path template
+            let mut path = root.to_path_buf();
+            let suffix = extension.map(|e| format!(".{}", e)).unwrap_or_else(String::new);
+            let last_part = format!("tmp_XXXXXX{}\0", suffix);
+            path.push(last_part);
+            let bytes = path.as_os_str().as_bytes();
+            // Create
+            let fd = unsafe { mkstemps(bytes.as_mut_ptr(), suffix.len() as i32) };
+            if fd == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(unsafe{ fs::File::from_raw_fd(fd) })
         }
 
         fn temp_dir_in(_root: &Path) -> Result<Self::Directory> {
