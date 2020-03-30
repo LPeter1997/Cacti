@@ -460,6 +460,9 @@ impl FileState {
                         events.push_back(Ok(Event::modify(mtime, path)));
                         *mod_time = mtime;
                     }
+                    else {
+                        println!("NO MTIME FOR YA");
+                    }
                 }
             },
         }
