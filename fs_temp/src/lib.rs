@@ -480,7 +480,7 @@ mod linux {
             if fd == -1 {
                 return Err(io::Error::last_os_error());
             }
-            Ok(fs::File::from_raw_fd(fd))
+            Ok(unsafe { fs::File::from_raw_fd(fd) })
         }
 
         fn temp_dir_in(_root: &Path) -> Result<Self::Directory> {
