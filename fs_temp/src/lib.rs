@@ -738,7 +738,7 @@ mod tests {
                 fs::canonicalize(".")?
             );
             //assert!(path.exists()); // NOTE: Not true for unix probably
-            assert!(path.extension() == Some(&OsString::from("txt")));
+            assert_eq!(path.extension().unwrap(), &OsString::from("txt"));
         }
         assert!(!path.exists());
         Ok(())
@@ -755,8 +755,8 @@ mod tests {
                 fs::canonicalize(".")?
             );
             //assert!(path.exists()); // NOTE: Not true for unix probably
-            assert!(path.extension() == Some(&OsString::from("txt")));
-            assert!(path.file_name() == Some(&OsString::from("hello.txt")));
+            assert_eq!(path.extension().unwrap(), &OsString::from("txt"));
+            assert_eq!(path.file_name().unwrap(), &OsString::from("hello.txt"));
         }
         assert!(!path.exists());
         Ok(())
