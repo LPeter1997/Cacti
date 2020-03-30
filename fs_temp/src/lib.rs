@@ -30,7 +30,7 @@
 //! # trait FsTemp {
 //! #    type Directory: std::fmt::Debug;
 //! #    fn temp_path() -> Result<PathBuf>;
-//! #    fn temp_file_in(root: &Path, extension: Option<&str>) -> Result<fs::File>;
+//! #    fn temp_file_in(root: &Path) -> Result<fs::File>;
 //! #    fn temp_dir_in(root: &Path) -> Result<Self::Directory>;
 //! # }
 //! #[cfg(target_os = "new_platform")]
@@ -49,9 +49,8 @@
 //!         }
 //!
 //!         /// Here you should create a file in the given root directory and
-//!         /// return a handle that deletes it when dropped. The optional
-//!         /// extension is supplied without the dot.
-//!         fn temp_file_in(root: &Path, extension: Option<&str>) -> Result<fs::File> {
+//!         /// return a handle that deletes it when dropped.
+//!         fn temp_file_in(root: &Path) -> Result<fs::File> {
 //!             // ...
 //! # unimplemented!()
 //!         }
@@ -95,48 +94,46 @@ use std::fs;
 // ////////////////////////////////////////////////////////////////////////// //
 
 /// Tries to create a temporary file at some default place, returning it's
-/// handle. An optional extension can be supplied - without the dot. When the
-/// returned handle gets dropped, the file is deleted.
+/// handle. When the returned handle gets dropped, the file is deleted.
 ///
 /// # Examples
 ///
-/// Creating a temporary TXT file:
+/// Creating a temporary file:
 ///
 /// ```no_run
 /// use std::io::Write;
 ///
 /// # fn main() -> std::io::Result<()> {
-/// let mut file = fs_temp::file(Some("txt"))?;
+/// let mut file = fs_temp::file()?;
 /// // Now we can write to the file!
 /// file.write_all("Hello, World!".as_bytes())?;
 /// # Ok(())
 /// # }
 /// ```
-pub fn file(extension: Option<&str>) -> Result<fs::File> {
-    file_in(&FsTempImpl::temp_path()?, extension)
+pub fn file() -> Result<fs::File> {
+    file_in(&FsTempImpl::temp_path()?)
 }
 
 /// Tries to create a temporary file inside the given root directory, returning
-/// it's handle. An optional extension can be supplied - without the dot. When
-/// the returned handle gets dropped, the file is deleted. The created file is
-/// guaranteed to be directly inside the given root directory.
+/// it's handle. When the returned handle gets dropped, the file is deleted. The
+/// created file is guaranteed to be directly inside the given root directory.
 ///
 /// # Examples
 ///
-/// Creating a temporary TXT file inside `C:/TMP`, assuming it exists:
+/// Creating a temporary file inside `C:/TMP`, assuming it exists:
 ///
 /// ```no_run
 /// use std::io::Write;
 ///
 /// # fn main() -> std::io::Result<()> {
-/// let mut file = fs_temp::file_in("C:/TMP", Some("txt"))?;
+/// let mut file = fs_temp::file_in("C:/TMP")?;
 /// // Now we can write to the file!
 /// file.write_all("Hello, World!".as_bytes())?;
 /// # Ok(())
 /// # }
 /// ```
-pub fn file_in(root: impl AsRef<Path>, extension: Option<&str>) -> Result<fs::File> {
-    FsTempImpl::temp_file_in(root.as_ref(), extension)
+pub fn file_in(root: impl AsRef<Path>) -> Result<fs::File> {
+    FsTempImpl::temp_file_in(root.as_ref())
 }
 
 /// Tries to create a temporary directory at some default place, returning it's
@@ -200,9 +197,8 @@ trait FsTemp {
     fn temp_path() -> Result<PathBuf>;
 
     /// Creates a file handle in the given root directory that automatically
-    /// gets deleted, when closed. An optional extension can be supplied without
-    /// the dot.
-    fn temp_file_in(root: &Path, extension: Option<&str>) -> Result<fs::File>;
+    /// gets deleted, when closed.
+    fn temp_file_in(root: &Path) -> Result<fs::File>;
 
     /// Creates a directory handle in the given root directory that
     /// automatically gets deleted, when closed.
@@ -265,7 +261,7 @@ mod unsupported {
                 "Temporary file paths are not supported on this platform!"))
         }
 
-        fn temp_file_in(_root: &Path, _extension: Option<&str>) -> Result<fs::File> {
+        fn temp_file_in(_root: &Path) -> Result<fs::File> {
             Err(Error::new(ErrorKind::Other,
                 "Temporary files are not supported on this platform!"))
         }
@@ -373,10 +369,10 @@ mod win32 {
             Ok(OsString::from_wide(buffer).into())
         }
 
-        fn temp_file_in(root: &Path, extension: Option<&str>) -> Result<fs::File> {
+        fn temp_file_in(root: &Path) -> Result<fs::File> {
             // Generate path
             let extra = unsafe { GetCurrentThreadId() };
-            let path = unique_path_with_timestamp(root, extra as u64, extension)?;
+            let path = unique_path_with_timestamp(root, extra as u64, Some(".TMP"))?;
             let path = to_wstring(path.as_os_str());
             // Actually create
             let handle = unsafe { CreateFileW(
@@ -448,17 +444,16 @@ mod win32 {
 
 #[cfg(target_os = "linux")]
 mod linux {
-    use std::ffi::OsString;
+    use std::ffi::c_void;
     use std::os::unix::io::FromRawFd;
     use std::os::unix::ffi::OsStringExt;
+    use std::env;
     use super::*;
 
     #[link(name = "c")]
     extern "C" {
-        fn mkstemps(
-            template  : *mut u8,
-            suffix_len: i32    ,
-        ) -> i32;
+        fn fileno(file: *mut c_void) -> i32;
+        fn tmpfile() -> *mut c_void;
     }
 
     /// The Linux implementation of the `FsTemp` trait.
@@ -471,19 +466,24 @@ mod linux {
             Ok(PathBuf::from("/tmp"))
         }
 
-        fn temp_file_in(root: &Path, extension: Option<&str>) -> Result<fs::File> {
-            // Build a path template
-            let mut path = root.to_path_buf();
-            let suffix = extension.map(|e| format!(".{}", e)).unwrap_or_else(String::new);
-            let last_part = format!("tmp_XXXXXX{}\0", suffix);
-            path.push(last_part);
-            let mut path = path.into_os_string().into_vec();
-            // Create
-            let fd = unsafe { mkstemps(path.as_mut_ptr(), suffix.len() as i32) };
-            if fd == -1 {
-                return Err(std::io::Error::last_os_error());
+        fn temp_file_in(root: &Path) -> Result<fs::File> {
+            // Get old default tempdir
+            let old_tmp = env::var("TMPDIR").unwrap(); // TODO
+            // Set current
+            env::set_var("TMPDIR", root);
+            // Create the file
+            let f = unsafe { tmpfile() };
+            // Get the error, just in case
+            let err = std::io::Error::last_os_error();
+            // Set back old value before anything
+            env::set_var("TMPDIR", old_tmp);
+            // Error checking, getting the fd
+            if f.is_null() {
+                return Err(err);
             }
-            Ok(unsafe{ fs::File::from_raw_fd(fd) })
+            // Turn into Rust file handle
+            let fd = unsafe { fileno(f) };
+            Ok(fs::File::from_raw_fd(fd))
         }
 
         fn temp_dir_in(_root: &Path) -> Result<Self::Directory> {
@@ -515,16 +515,14 @@ mod linux {
 mod tests {
     use super::*;
     use fs_path::FilePath;
-    use std::ffi::OsString;
 
     #[test]
     fn test_file() -> Result<()> {
         let path;
         {
-            let file = file(Some("txt"))?;
+            let file = file()?;
             path = file.path()?;
             assert!(path.exists());
-            assert!(path.extension() == Some(&OsString::from("txt")));
         }
         assert!(!path.exists());
         Ok(())
@@ -534,14 +532,13 @@ mod tests {
     fn test_file_in() -> Result<()> {
         let path;
         {
-            let file = file_in(".", Some("txt"))?;
+            let file = file_in(".")?;
             path = file.path()?;
             assert_eq!(
                 fs::canonicalize(path.parent().unwrap())?,
                 fs::canonicalize(".")?
             );
             assert!(path.exists());
-            assert!(path.extension() == Some(&OsString::from("txt")));
         }
         assert!(!path.exists());
         Ok(())
