@@ -406,7 +406,7 @@ mod unsupported {
     use std::io::{Error, ErrorKind};
     use super::*;
 
-    pub struct UnsupportedTemp(()); // Tag it so it's not instantiatable
+    pub struct UnsupportedTemp;
 
     impl FsTemp for UnsupportedTemp {
         type Directory = UnsupportedDirectory;
@@ -438,7 +438,7 @@ mod unsupported {
     }
 
     #[derive(Debug)]
-    pub struct UnsupportedDirectory(()); // Tag it so it's not instantiatable
+    pub struct UnsupportedDirectory;
 
     impl UnsupportedDirectory {
         pub fn path(&self) -> &Path { unimplemented!() }
@@ -506,8 +506,8 @@ mod win32 {
         s.encode_wide().chain(Some(0).into_iter()).collect()
     }
 
-    /// The Win32 implementation of the library.
-    pub struct WinApiTemp(()); // Tag it so it's not instantiatable
+    /// The Win32 implementation of `trait FsTemp`.
+    pub struct WinApiTemp;
 
     impl FsTemp for WinApiTemp {
         type Directory = WinApiDirectory;
@@ -601,6 +601,18 @@ mod win32 {
 
     impl WinApiDirectory {
         pub fn path(&self) -> &Path { &self.path }
+    }
+}
+
+// Unix implementation /////////////////////////////////////////////////////////
+
+#[cfg(target_family = "unix")]
+mod unix {
+    use super::*;
+
+    #[link(name = "c")]
+    extern "C" {
+
     }
 }
 
