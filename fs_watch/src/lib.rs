@@ -716,7 +716,9 @@ mod win32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
+    // TODO: Would make a nice macro
     fn cat_path(root: &Path, name: &str) -> PathBuf {
         let mut path = root.to_path_buf();
         path.push(name);
@@ -742,26 +744,75 @@ mod tests {
     }
 
     #[test]
-    fn test_poll_watch_create_modify_delete() -> Result<()> {
+    fn test_poll_watch_recursive_create_modify_delete() -> Result<()> {
         let dir = fs_temp::directory()?;
         let mut w = PollWatch::new()?;
         w.watch(dir.path(), Recursion::Recursive)?;
         w.set_interval(Duration::from_millis(0));
 
-        println!("{:?}", w.poll_event());
+        assert!(w.poll_event().is_none());
 
+        let foo_path = cat_path(dir.path(), "foo.txt");
         // Create
         {
             { create_file_in(dir.path(), "foo.txt")?; }
             {
+                // An event for file creation
                 let e = w.poll_event().unwrap().unwrap();
-                assert!(w.poll_event().is_none());
-
                 assert_eq!(e.kind, EventKind::Create);
                 assert_eq!(
                     fs::canonicalize(e.path)?,
-                    fs::canonicalize(cat_path(dir.path(), "foo.txt"))?
+                    fs::canonicalize(&foo_path)?
                 );
+                // An event for directory modification
+                let e = w.poll_event().unwrap().unwrap();
+                assert_eq!(e.kind, EventKind::Modify);
+                assert_eq!(
+                    fs::canonicalize(e.path)?,
+                    fs::canonicalize(dir.path())?
+                );
+                // No more
+                assert!(w.poll_event().is_none());
+            }
+        }
+        // Modify
+        {
+            {
+                let mut f = create_file_in(dir.path(), "foo.txt")?;
+                f.write_all("Hello".as_bytes())?;
+            }
+            {
+                // An event for file modification
+                let e = w.poll_event().unwrap().unwrap();
+                assert_eq!(e.kind, EventKind::Modify);
+                assert_eq!(
+                    fs::canonicalize(e.path)?,
+                    fs::canonicalize(&foo_path)?
+                );
+                // No more
+                assert!(w.poll_event().is_none());
+            }
+        }
+        // Delete
+        {
+            {
+                fs::remove_file(&foo_path)?;
+            }
+            {
+                // An event for file delete
+                let e = w.poll_event().unwrap().unwrap();
+                assert_eq!(e.kind, EventKind::Delete);
+                // We can't canonicalize anymore
+                assert!(e.path.ends_with("foo.txt"));
+                // An event for directory modification
+                let e = w.poll_event().unwrap().unwrap();
+                assert_eq!(e.kind, EventKind::Modify);
+                assert_eq!(
+                    fs::canonicalize(e.path)?,
+                    fs::canonicalize(dir.path())?
+                );
+                // No more
+                assert!(w.poll_event().is_none());
             }
         }
 
