@@ -778,7 +778,8 @@ mod tests {
         // Create
         {
             {
-                let f = create_file_in(&dir_canon, "foo.txt")?;
+                let mut f = create_file_in(&dir_canon, "foo.txt")?;
+                f.write_all("Hello".as_bytes())?;
                 f.sync_all()?;
             }
             {
