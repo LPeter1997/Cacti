@@ -720,7 +720,7 @@ mod tests {
         {
             let file = file(Some("txt"))?;
             path = file.path()?;
-            assert!(path.exists()); // NOTE: Not true for unix probably
+            //assert!(path.exists()); // NOTE: Not true for unix probably
             assert!(path.extension() == Some(&OsString::from("txt")));
         }
         assert!(!path.exists());
@@ -737,7 +737,7 @@ mod tests {
                 fs::canonicalize(path.parent().unwrap())?,
                 fs::canonicalize(".")?
             );
-            assert!(path.exists()); // NOTE: Not true for unix probably
+            //assert!(path.exists()); // NOTE: Not true for unix probably
             assert!(path.extension() == Some(&OsString::from("txt")));
         }
         assert!(!path.exists());
@@ -754,7 +754,7 @@ mod tests {
                 fs::canonicalize(path.parent().unwrap())?,
                 fs::canonicalize(".")?
             );
-            assert!(path.exists()); // NOTE: Not true for unix probably
+            //assert!(path.exists()); // NOTE: Not true for unix probably
             assert!(path.extension() == Some(&OsString::from("txt")));
             assert!(path.file_name() == Some(&OsString::from("hello.txt")));
         }
@@ -768,7 +768,7 @@ mod tests {
         {
             let dir = directory()?;
             path = dir.path().to_path_buf();
-            assert!(path.exists()); // NOTE: Not true for unix probably
+            assert!(path.exists());
         }
         assert!(!path.exists());
         Ok(())
@@ -784,7 +784,7 @@ mod tests {
                 fs::canonicalize(path.parent().unwrap())?,
                 fs::canonicalize(".")?
             );
-            assert!(path.exists()); // NOTE: Not true for unix probably
+            assert!(path.exists());
         }
         assert!(!path.exists());
         Ok(())
@@ -800,7 +800,7 @@ mod tests {
                 fs::canonicalize(path.parent().unwrap())?,
                 fs::canonicalize(".")?
             );
-            assert!(path.exists()); // NOTE: Not true for unix probably
+            assert!(path.exists());
             assert!(path.ends_with("foo"));
         }
         assert!(!path.exists());
