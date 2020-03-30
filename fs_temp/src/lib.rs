@@ -629,10 +629,10 @@ mod tests {
 
     #[test]
     fn test_path() -> Result<()> {
-        let p = path(None)?;
-        assert!(!p.exists());
-        assert!(p.extension() == None);
-        let parent = p.parent();
+        let path = path(None)?;
+        assert!(!path.exists());
+        assert!(path.extension() == None);
+        let parent = path.parent();
         assert!(parent.is_some());
         assert!(parent.unwrap().exists());
         Ok(())
@@ -640,10 +640,10 @@ mod tests {
 
     #[test]
     fn test_path_with_extension() -> Result<()> {
-        let p = path(Some("txt"))?;
-        assert!(!p.exists());
-        assert!(p.extension() == Some(&OsString::from("txt")));
-        let parent = p.parent();
+        let path = path(Some("txt"))?;
+        assert!(!path.exists());
+        assert!(path.extension() == Some(&OsString::from("txt")));
+        let parent = path.parent();
         assert!(parent.is_some());
         assert!(parent.unwrap().exists());
         Ok(())
@@ -651,25 +651,23 @@ mod tests {
 
     #[test]
     fn test_path_in() -> Result<()> {
-        // We kinda depend on `path` for this
-        let root = path(None)?;
-        let p = path_in(&root, None)?;
-        assert!(!p.exists());
-        assert!(p.extension() == None);
-        let parent = p.parent();
-        assert!(parent.is_some());
-        assert_eq!(parent.unwrap(), root);
+        let path = path_in(".", None)?;
+        assert!(!path.exists());
+        assert!(path.extension() == None);
+        assert_eq!(
+            fs::canonicalize(path.parent().unwrap())?,
+            fs::canonicalize(".")?
+        );
         Ok(())
     }
 
     #[test]
     fn test_file() -> Result<()> {
-        // NOTE: We can't get file path
         let path;
         {
             let file = file(Some("txt"))?;
             path = file.path()?;
-            assert!(path.exists());
+            assert!(path.exists()); // NOTE: Not true for unix probably
             assert!(path.extension() == Some(&OsString::from("txt")));
         }
         assert!(!path.exists());
@@ -680,20 +678,36 @@ mod tests {
     fn test_file_in() -> Result<()> {
         let path;
         {
-            let dir = file_in(".", Some("txt"))?;
-            path = dir.path()?;
+            let file = file_in(".", Some("txt"))?;
+            path = file.path()?;
             assert_eq!(
                 fs::canonicalize(path.parent().unwrap())?,
                 fs::canonicalize(".")?
             );
-            assert!(path.exists());
+            assert!(path.exists()); // NOTE: Not true for unix probably
             assert!(path.extension() == Some(&OsString::from("txt")));
         }
         assert!(!path.exists());
         Ok(())
     }
 
-    // NOTE: Test file_at?
+    #[test]
+    fn test_file_at() -> Result<()> {
+        let path;
+        {
+            let dir = file_at("./hello.txt")?;
+            path = dir.path()?;
+            assert_eq!(
+                fs::canonicalize(path.parent().unwrap())?,
+                fs::canonicalize(".")?
+            );
+            assert!(path.exists()); // NOTE: Not true for unix probably
+            assert!(path.extension() == Some(&OsString::from("txt")));
+            assert!(path.file_name() == Some(&OsString::from("hello.txt")));
+        }
+        assert!(!path.exists());
+        Ok(())
+    }
 
     #[test]
     fn test_directory() -> Result<()> {
@@ -701,7 +715,7 @@ mod tests {
         {
             let dir = directory()?;
             path = dir.path().to_path_buf();
-            assert!(path.exists());
+            assert!(path.exists()); // NOTE: Not true for unix probably
         }
         assert!(!path.exists());
         Ok(())
@@ -717,12 +731,26 @@ mod tests {
                 fs::canonicalize(path.parent().unwrap())?,
                 fs::canonicalize(".")?
             );
-            assert!(path.exists());
+            assert!(path.exists()); // NOTE: Not true for unix probably
         }
         assert!(!path.exists());
         Ok(())
     }
 
-    // NOTE: Test directory_in?
-    // NOTE: Test directory_at?
+    #[test]
+    fn test_directory_at() -> Result<()> {
+        let path;
+        {
+            let dir = directory_at("./foo")?;
+            path = dir.path().to_path_buf();
+            assert_eq!(
+                fs::canonicalize(path.parent().unwrap())?,
+                fs::canonicalize(".")?
+            );
+            assert!(path.exists()); // NOTE: Not true for unix probably
+            assert!(path.ends_with("foo"));
+        }
+        assert!(!path.exists());
+        Ok(())
+    }
 }
