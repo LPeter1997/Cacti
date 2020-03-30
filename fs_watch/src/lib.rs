@@ -773,6 +773,7 @@ mod tests {
         println!("STAGE 2");
 
         let foo_path = cat_path(&dir_canon, "foo.txt");
+        println!("PATH MTIME: {:?}", fs::metadata(&dir_canon)?.modified());
         // Create
         {
             {
@@ -780,6 +781,7 @@ mod tests {
                 f.sync_all()?;
             }
             {
+                println!("PATH MTIME2: {:?}", fs::metadata(&dir_canon)?.modified());
                 println!("STAGE 3");
                 // An event for file creation
                 let e = w.poll_event().unwrap().unwrap();
