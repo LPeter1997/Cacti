@@ -640,7 +640,7 @@ mod unix {
                 .create_new(true)
                 .read(true).write(true)
                 .open(path)?;
-            let cpath = to_cstring(path);
+            let cpath = to_cstring(path.as_os_str());
             unsafe { unlink(cpath.as_ptr()) };
             Ok(f)
         }
