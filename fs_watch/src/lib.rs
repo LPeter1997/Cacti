@@ -760,9 +760,10 @@ mod tests {
 
     #[test]
     fn test_poll_watch_recursive_create_modify_delete() -> Result<()> {
-        let dir = fs::canonicalize(fs_temp::directory()?)?;
+        let dir = fs_temp::directory()?;
         let mut w = PollWatch::new()?;
-        w.watch(fs::canonicalize(dir.path())?, Recursion::Recursive)?;
+        let dir_canon = fs::canonicalize(dir.path())?;
+        w.watch(&dir_canon, Recursion::Recursive)?;
         w.set_interval(Duration::from_millis(0));
 
         println!("STAGE 1");
@@ -771,11 +772,11 @@ mod tests {
 
         println!("STAGE 2");
 
-        let foo_path = cat_path(dir.path(), "foo.txt");
+        let foo_path = cat_path(&dir_canon, "foo.txt");
         // Create
         {
             {
-                let f = create_file_in(dir.path(), "foo.txt")?;
+                let f = create_file_in(&dir_canon, "foo.txt")?;
                 f.sync_all()?;
             }
             {
@@ -794,7 +795,7 @@ mod tests {
                 assert_eq!(e.kind, EventKind::Modify);
                 assert_eq!(
                     fs::canonicalize(e.path)?,
-                    fs::canonicalize(dir.path())?
+                    dir_canon
                 );
                 // No more
                 assert!(w.poll_event().is_none());
