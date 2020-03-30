@@ -25,12 +25,5 @@ matrix:
     name: "Tests - Windows"
 
 script:
-  - mkdir testdir
-  - stat testdir
-  - sleep 3
-  - cd testdir
-  - touch aaa
-  - cd ..
-  - stat testdir
   - cargo build --package fs_watch --verbose
   - cargo test --package fs_watch --verbose -- --nocapture
