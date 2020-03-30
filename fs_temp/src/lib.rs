@@ -630,6 +630,7 @@ mod win32 {
             if self.handle == INVALID_HANDLE_VALUE {
                 return;
             }
+            let _ = fs::remove_dir_all(&self.path);
             unsafe { CloseHandle(self.handle) };
             self.handle = INVALID_HANDLE_VALUE;
         }
@@ -869,6 +870,22 @@ mod tests {
         let mut sub = dir.path().to_path_buf();
         sub.push("foo.txt");
         fs::File::create(sub)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_directory_with_file_inside() -> Result<()> {
+        let path;
+        {
+            let dir = directory()?;
+            println!("Dir is: {:?}", dir);
+            path = dir.path().to_path_buf();
+            let mut sub = dir.path().to_path_buf();
+            sub.push("foo.txt");
+            fs::File::create(sub)?;
+        }
+        assert!(!path.exists());
 
         Ok(())
     }
