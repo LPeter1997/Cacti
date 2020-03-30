@@ -778,6 +778,7 @@ mod tests {
         println!("Foo path {:?}", foo_path);
         // Create
         {
+            thread::sleep(Duration::from_millis(500));
             {
                 let mut f = create_file_in(&dir_canon, "foo.txt")?;
                 println!("Foo ACTUAL path {:?}", f.path());
