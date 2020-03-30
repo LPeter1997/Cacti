@@ -847,6 +847,7 @@ mod tests {
             assert!(w.poll_event().is_none());
         }
         // Replace with file
+        thread::sleep(Duration::from_millis(5));
         let _f = fs_temp::file_at(&dir_path)?;
 
         // An event for directory deletion
@@ -885,6 +886,7 @@ mod tests {
             assert!(w.poll_event().is_none());
         }
         // Replace with directory
+        thread::sleep(Duration::from_millis(5));
         let _f = fs_temp::directory_at(&dir_path)?;
 
         // An event for directory deletion
