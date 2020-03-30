@@ -15,11 +15,5 @@ fn main() -> std::io::Result<()> {
     }
     // It must have been deleted by now
 
-    // Creating the temporary file "./foo.txt"
-    {
-        let _file = fs_temp::file_at("./foo.txt")?;
-    }
-    // It must have been deleted by now
-
     Ok(())
 }

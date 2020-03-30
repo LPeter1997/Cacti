@@ -25,17 +25,5 @@ fn main() -> std::io::Result<()> {
     // It must have been deleted by now
     assert!(!path.exists());
 
-    // Creating the temporary directory "./hello"
-    let path;
-    {
-        let dir = fs_temp::directory_at("./hello")?;
-        path = fs::canonicalize(dir.path())?;
-        assert!(path.ends_with("hello"));
-        println!("Temporary created at {:?}", path);
-        assert!(path.exists());
-    }
-    // It must have been deleted by now
-    assert!(!path.exists());
-
     Ok(())
 }
