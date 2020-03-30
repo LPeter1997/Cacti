@@ -1,5 +1,4 @@
-//! Cross-platform utility for generating unique temporary paths, files and
-//! directories.
+//! Cross-platform utility for creating unique temporary files and directories.
 //!
 //! The whole library consists of a handful of functions and a single type:
 //!  * [file](fn.file.html): Creates a temporary file that gets deleted when
@@ -473,6 +472,10 @@ mod linux {
     #[derive(Debug)]
     pub struct LinuxDirectory {
         path: PathBuf,
+    }
+
+    impl LinuxDirectory {
+        pub fn path(&self) -> &Path { &self.path }
     }
 }
 
