@@ -614,6 +614,36 @@ mod unix {
     extern "C" {
 
     }
+
+    /// `trait FsTemp` on Unix systems.
+    pub struct UnixTemp;
+
+    impl FsTemp for UnixTemp {
+        type Directory = UnixDirectory;
+
+        fn temp_path() -> Result<PathBuf> {
+            unimplemented!()
+        }
+
+        fn temp_file(path: &Path) -> Result<fs::File> {
+            unimplemented!()
+        }
+
+        fn temp_dir(path: &Path) -> Result<Self::Directory> {
+            unimplemented!()
+        }
+
+        fn unique_path_in(root: &Path, extension: Option<&str>) -> Result<PathBuf> {
+            unimplemented!()
+        }
+    }
+
+    /// Unix directory handle type.
+    pub struct UnixDirectory;
+
+    impl UnixDirectory {
+        pub fn path(&self) -> &Path { unimplemented!() }
+    }
 }
 
 // Choosing the right implementation based on platform.
