@@ -622,19 +622,19 @@ mod unix {
         type Directory = UnixDirectory;
 
         fn temp_path() -> Result<PathBuf> {
-            unimplemented!()
+            panic!("TODO UNIX")
         }
 
         fn temp_file(path: &Path) -> Result<fs::File> {
-            unimplemented!()
+            panic!("TODO UNIX")
         }
 
         fn temp_dir(path: &Path) -> Result<Self::Directory> {
-            unimplemented!()
+            panic!("TODO UNIX")
         }
 
         fn unique_path_in(root: &Path, extension: Option<&str>) -> Result<PathBuf> {
-            unimplemented!()
+            panic!("TODO UNIX")
         }
     }
 
@@ -643,14 +643,18 @@ mod unix {
     pub struct UnixDirectory;
 
     impl UnixDirectory {
-        pub fn path(&self) -> &Path { unimplemented!() }
+        pub fn path(&self) -> &Path { panic!("TODO UNIX") }
     }
 }
 
 // Choosing the right implementation based on platform.
 
 #[cfg(target_os = "windows")] type FsTempImpl = win32::WinApiTemp;
-#[cfg(not(target_os = "windows"))] type FsTempImpl = unsupported::UnsupportedTemp;
+#[cfg(target_family = "unix")] type FsTempImpl = unix::UnixTemp;
+#[cfg(not(any(
+    target_os = "windows",
+    target_family = "unix",
+)))] type FsTempImpl = unsupported::UnsupportedTemp;
 
 #[cfg(test)]
 mod tests {
