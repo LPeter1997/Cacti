@@ -760,7 +760,7 @@ mod tests {
 
     #[test]
     fn test_poll_watch_recursive_create_modify_delete() -> Result<()> {
-        let dir = fs_temp::directory()?;
+        let dir = fs::canonicalize(fs_temp::directory()?)?;
         let mut w = PollWatch::new()?;
         w.watch(fs::canonicalize(dir.path())?, Recursion::Recursive)?;
         w.set_interval(Duration::from_millis(0));
