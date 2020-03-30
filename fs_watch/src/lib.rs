@@ -753,6 +753,160 @@ mod tests {
     }
 
     #[test]
+    fn test_poll_watch_directory_created_deleted() -> Result<()> {
+        let mut w = PollWatch::new()?;
+        let dir_path = fs_temp::path_in(".", None)?;
+        w.watch(&dir_path, Recursion::NotRecursive)?;
+        w.set_interval(Duration::from_millis(0));
+
+        assert!(w.poll_event().is_none());
+
+        {
+            thread::sleep(Duration::from_millis(5));
+            let _dir = fs_temp::directory_at(&dir_path)?;
+
+            // An event for directory creation
+            let e = w.poll_event().unwrap().unwrap();
+            assert_eq!(e.kind, EventKind::Create);
+            assert_eq!(
+                fs::canonicalize(e.path)?,
+                fs::canonicalize(&dir_path)?
+            );
+            // No more
+            assert!(w.poll_event().is_none());
+        }
+
+        thread::sleep(Duration::from_millis(5));
+        // An event for directory deletion
+        let e = w.poll_event().unwrap().unwrap();
+        assert_eq!(e.kind, EventKind::Delete);
+        // We can't canonicalize anymore
+        assert!(e.path.ends_with(dir_path));
+        // No more
+        assert!(w.poll_event().is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_poll_watch_directory_deleted_created() -> Result<()> {
+        let mut w = PollWatch::new()?;
+        let dir_path = fs_temp::path_in(".", None)?;
+        w.set_interval(Duration::from_millis(0));
+
+        assert!(w.poll_event().is_none());
+
+        {
+            thread::sleep(Duration::from_millis(5));
+            let _dir = fs_temp::directory_at(&dir_path)?;
+
+            w.watch(&dir_path, Recursion::NotRecursive)?;
+
+            assert!(w.poll_event().is_none());
+        }
+
+        thread::sleep(Duration::from_millis(5));
+        // An event for directory deletion
+        let e = w.poll_event().unwrap().unwrap();
+        assert_eq!(e.kind, EventKind::Delete);
+        // We can't canonicalize
+        assert!(e.path.ends_with(&dir_path));
+        // No more
+        assert!(w.poll_event().is_none());
+
+        // Re-create
+        thread::sleep(Duration::from_millis(5));
+        let _dir = fs_temp::directory_at(&dir_path)?;
+        // An event for directory creation
+        let e = w.poll_event().unwrap().unwrap();
+        assert_eq!(e.kind, EventKind::Create);
+        assert_eq!(
+            fs::canonicalize(e.path)?,
+            fs::canonicalize(&dir_path)?
+        );
+        // No more
+        assert!(w.poll_event().is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_poll_watch_directory_directory_to_file() -> Result<()> {
+        let mut w = PollWatch::new()?;
+        let dir_path = fs_temp::path_in(".", None)?;
+        w.set_interval(Duration::from_millis(0));
+
+        assert!(w.poll_event().is_none());
+
+        {
+            thread::sleep(Duration::from_millis(5));
+            let _dir = fs_temp::directory_at(&dir_path)?;
+
+            w.watch(&dir_path, Recursion::NotRecursive)?;
+
+            assert!(w.poll_event().is_none());
+        }
+        // Replace with file
+        let _f = fs_temp::file_at(&dir_path)?;
+
+        // An event for directory deletion
+        let e = w.poll_event().unwrap().unwrap();
+        assert_eq!(e.kind, EventKind::Delete);
+        // We can't canonicalize
+        assert!(e.path.ends_with(&dir_path));
+
+        // An event for file-creation
+        let e = w.poll_event().unwrap().unwrap();
+        assert_eq!(e.kind, EventKind::Create);
+        assert_eq!(
+            fs::canonicalize(e.path)?,
+            fs::canonicalize(&dir_path)?
+        );
+        // No more
+        assert!(w.poll_event().is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_poll_watch_directory_file_to_directory() -> Result<()> {
+        let mut w = PollWatch::new()?;
+        let dir_path = fs_temp::path_in(".", None)?;
+        w.set_interval(Duration::from_millis(0));
+
+        assert!(w.poll_event().is_none());
+
+        {
+            thread::sleep(Duration::from_millis(5));
+            let _dir = fs_temp::file_at(&dir_path)?;
+
+            w.watch(&dir_path, Recursion::NotRecursive)?;
+
+            assert!(w.poll_event().is_none());
+        }
+        // Replace with directory
+        let _f = fs_temp::directory_at(&dir_path)?;
+
+        // An event for directory deletion
+        let e = w.poll_event().unwrap().unwrap();
+        assert_eq!(e.kind, EventKind::Delete);
+        // We can't canonicalize
+        assert!(e.path.ends_with(&dir_path));
+
+        // An event for file-creation
+        let e = w.poll_event().unwrap().unwrap();
+        assert_eq!(e.kind, EventKind::Create);
+        assert_eq!(
+            fs::canonicalize(e.path)?,
+            fs::canonicalize(&dir_path)?
+        );
+        // No more
+        assert!(w.poll_event().is_none());
+
+        Ok(())
+    }
+
+    #[test]
     fn test_poll_watch_directory_recursive_create_modify_delete_file() -> Result<()> {
         let dir = fs_temp::directory()?;
         let mut w = PollWatch::new()?;
