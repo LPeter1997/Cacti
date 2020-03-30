@@ -764,8 +764,10 @@ mod tests {
         let foo_path = cat_path(dir.path(), "foo.txt");
         // Create
         {
-            { create_file_in(dir.path(), "foo.txt")?; }
-            thread::sleep(Duration::from_millis(5));
+            {
+                thread::sleep(Duration::from_millis(5));
+                create_file_in(dir.path(), "foo.txt")?;
+            }
             {
                 // An event for file creation
                 let e = w.poll_event().unwrap().unwrap();
@@ -788,10 +790,10 @@ mod tests {
         // Modify
         {
             {
+                thread::sleep(Duration::from_millis(5));
                 let mut f = create_file_in(dir.path(), "foo.txt")?;
                 f.write_all("Hello".as_bytes())?;
             }
-            thread::sleep(Duration::from_millis(5));
             {
                 // An event for file modification
                 let e = w.poll_event().unwrap().unwrap();
@@ -807,9 +809,9 @@ mod tests {
         // Delete
         {
             {
+                thread::sleep(Duration::from_millis(5));
                 fs::remove_file(&foo_path)?;
             }
-            thread::sleep(Duration::from_millis(5));
             {
                 // An event for file delete
                 let e = w.poll_event().unwrap().unwrap();
