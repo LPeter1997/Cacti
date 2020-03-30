@@ -730,6 +730,7 @@ mod win32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fs_path::FilePath;
     use std::thread;
     use std::io::Write;
 
@@ -779,6 +780,7 @@ mod tests {
         {
             {
                 let mut f = create_file_in(&dir_canon, "foo.txt")?;
+                println!("Foo ACTUAL path {:?}", f.path());
                 f.write_all("Hello".as_bytes())?;
                 f.sync_all()?;
             }

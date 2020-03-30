@@ -8,3 +8,4 @@ edition = "2018"
 
 [dependencies]
 fs_temp = { path = "../fs_temp" }
+fs_path = { path = "../fs_path" }
