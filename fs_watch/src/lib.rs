@@ -765,13 +765,18 @@ mod tests {
         w.watch(fs::canonicalize(dir.path())?, Recursion::Recursive)?;
         w.set_interval(Duration::from_millis(0));
 
+        println!("STAGE 1");
+
         assert!(w.poll_event().is_none());
+
+        println!("STAGE 2");
 
         let foo_path = cat_path(dir.path(), "foo.txt");
         // Create
         {
             { create_file_in(dir.path(), "foo.txt")?; }
             {
+                println!("STAGE 3");
                 // An event for file creation
                 let e = w.poll_event().unwrap().unwrap();
                 assert_eq!(e.kind, EventKind::Create);
