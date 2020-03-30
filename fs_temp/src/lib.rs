@@ -465,6 +465,8 @@ mod win32 {
     const GENERIC_READ : u32 = 0x80000000;
     const GENERIC_WRITE: u32 = 0x40000000;
     // Share constants
+    const FILE_SHARE_READ  : u32 = 0x00000001;
+    const FILE_SHARE_WRITE : u32 = 0x00000002;
     const FILE_SHARE_DELETE: u32 = 0x00000004;
     // Creation and disposition
     const CREATE_NEW   : u32 = 1;
@@ -566,7 +568,7 @@ mod win32 {
             let handle = unsafe { CreateFileW(
                 wpath.as_ptr(),
                 GENERIC_READ | GENERIC_WRITE,
-                FILE_SHARE_DELETE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                 ptr::null_mut(),
                 OPEN_EXISTING,
                 FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE | FILE_FLAG_BACKUP_SEMANTICS,
