@@ -448,6 +448,7 @@ mod linux {
     use std::os::unix::io::FromRawFd;
     use std::os::unix::ffi::OsStringExt;
     use std::env;
+    use std::io;
     use super::*;
 
     #[link(name = "c")]
@@ -467,22 +468,18 @@ mod linux {
         }
 
         fn temp_file_in(root: &Path) -> Result<fs::File> {
-            // Get old default tempdir
-            let old_tmp = env::var("TMPDIR").unwrap(); // TODO
-            // Set current
+            // Set current temporary directory
             env::set_var("TMPDIR", root);
             // Create the file
             let f = unsafe { tmpfile() };
-            // Get the error, just in case
-            let err = std::io::Error::last_os_error();
-            // Set back old value before anything
-            env::set_var("TMPDIR", old_tmp);
-            // Error checking, getting the fd
             if f.is_null() {
-                return Err(err);
+                return Err(io::Error::last_os_error());
             }
             // Turn into Rust file handle
             let fd = unsafe { fileno(f) };
+            if fd == -1 {
+                return Err(io::Error::last_os_error());
+            }
             Ok(fs::File::from_raw_fd(fd))
         }
 
