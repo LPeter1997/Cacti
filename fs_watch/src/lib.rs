@@ -760,20 +760,19 @@ mod tests {
 
     #[test]
     fn test_poll_watch_recursive_create_modify_delete() -> Result<()> {
-        let d = fs::create_dir("./test");
-        let mt1 = fs::metadata("./test")?.modified()?;
+        let d = fs_temp::directory()?;
+
+        let mt1 = fs::metadata(d.path())?.modified()?;
         println!("Modified 1: {:?}", mt1);
 
         thread::sleep(Duration::from_millis(500));
         {
-            let f = fs::File::create("./test/foo.txt");
+            let f = fs::File::create(cat_path(d.path(), "foo.txt"));
         }
 
-        let mt2 = fs::metadata("./test")?.modified()?;
+        let mt2 = fs::metadata(d.path())?.modified()?;
         println!("Modified 2: {:?}", mt2);
         println!("Modified 2 > Modified 1: {}", mt2 > mt1);
-
-        fs::remove_dir_all("./test")?;
 
         Ok(())
     }
