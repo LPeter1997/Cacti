@@ -774,7 +774,10 @@ mod tests {
         let foo_path = cat_path(dir.path(), "foo.txt");
         // Create
         {
-            { create_file_in(dir.path(), "foo.txt")?; }
+            {
+                let f = create_file_in(dir.path(), "foo.txt")?;
+                f.sync_all()?;
+            }
             {
                 println!("STAGE 3");
                 // An event for file creation
