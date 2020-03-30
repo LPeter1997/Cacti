@@ -646,7 +646,10 @@ mod unix {
         }
 
         fn temp_dir(path: &Path) -> Result<Self::Directory> {
-            panic!("TODO UNIX")
+            // NOTE: For now we default to this, this is a worse alternative to
+            // the Windows one, but will do just fine for now
+            fs::create_dir(path)?;
+            UnixDirectory(path.to_path_buf())
         }
 
         fn unique_path_in(root: &Path, extension: Option<&str>) -> Result<PathBuf> {
@@ -658,10 +661,16 @@ mod unix {
 
     /// Unix directory handle type.
     #[derive(Debug)]
-    pub struct UnixDirectory;
+    pub struct UnixDirectory(PathBuf);
+
+    impl Drop for UnixDirectory {
+        fn drop(&mut self) {
+            fs::remove_dir(&self.0)
+        }
+    }
 
     impl UnixDirectory {
-        pub fn path(&self) -> &Path { panic!("TODO UNIX") }
+        pub fn path(&self) -> &Path { &self.0 }
     }
 }
 
