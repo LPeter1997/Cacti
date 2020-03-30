@@ -756,7 +756,7 @@ mod tests {
     fn test_poll_watch_recursive_create_modify_delete() -> Result<()> {
         let dir = fs_temp::directory()?;
         let mut w = PollWatch::new()?;
-        w.watch(dir.path(), Recursion::Recursive)?;
+        w.watch(fs::canonicalize(dir.path())?, Recursion::Recursive)?;
         w.set_interval(Duration::from_millis(0));
 
         assert!(w.poll_event().is_none());
@@ -765,7 +765,6 @@ mod tests {
         // Create
         {
             { create_file_in(dir.path(), "foo.txt")?; }
-            thread::sleep(Duration::from_millis(50));
             {
                 // An event for file creation
                 let e = w.poll_event().unwrap().unwrap();
@@ -775,6 +774,7 @@ mod tests {
                     fs::canonicalize(&foo_path)?
                 );
                 // An event for directory modification
+                // TODO: This looks like not propagated event handling to me...
                 let e = w.poll_event().unwrap().unwrap();
                 assert_eq!(e.kind, EventKind::Modify);
                 assert_eq!(
@@ -791,7 +791,6 @@ mod tests {
                 let mut f = create_file_in(dir.path(), "foo.txt")?;
                 f.write_all("Hello".as_bytes())?;
             }
-            thread::sleep(Duration::from_millis(50));
             {
                 // An event for file modification
                 let e = w.poll_event().unwrap().unwrap();
@@ -809,7 +808,6 @@ mod tests {
             {
                 fs::remove_file(&foo_path)?;
             }
-            thread::sleep(Duration::from_millis(50));
             {
                 // An event for file delete
                 let e = w.poll_event().unwrap().unwrap();
