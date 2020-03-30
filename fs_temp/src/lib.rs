@@ -460,11 +460,11 @@ mod linux {
             Ok(PathBuf::from("/tmp"))
         }
 
-        fn temp_file_in(_path: &Path, _extension: Option<&str>) -> Result<fs::File> {
+        fn temp_file_in(_root: &Path, _extension: Option<&str>) -> Result<fs::File> {
             unimplemented!()
         }
 
-        fn temp_dir_in(_path: &Path) -> Result<fs::File> {
+        fn temp_dir_in(_root: &Path) -> Result<Self::Directory> {
             unimplemented!()
         }
     }
