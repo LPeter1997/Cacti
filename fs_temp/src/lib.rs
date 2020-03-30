@@ -610,6 +610,7 @@ mod win32 {
 
 #[cfg(target_family = "unix")]
 mod unix {
+    use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
     use super::*;
 
