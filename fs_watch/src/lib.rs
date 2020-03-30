@@ -464,6 +464,9 @@ impl FileState {
                         println!("NO MTIME FOR YA");
                     }
                 }
+                else {
+                    println!("FAILED TO READ MTIME NOOO");
+                }
             },
         }
     }
