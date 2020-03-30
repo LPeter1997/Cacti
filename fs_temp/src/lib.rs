@@ -641,6 +641,7 @@ mod unix {
                 .open(path)?;
             let cpath = to_cstring(path);
             unsafe { unlink(cpath.as_ptr()) };
+            Ok(f)
         }
 
         fn temp_dir(path: &Path) -> Result<Self::Directory> {
