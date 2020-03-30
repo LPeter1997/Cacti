@@ -753,7 +753,7 @@ mod tests {
     }
 
     #[test]
-    fn test_poll_watch_recursive_create_modify_delete() -> Result<()> {
+    fn test_poll_watch_directory_recursive_create_modify_delete_file() -> Result<()> {
         let dir = fs_temp::directory()?;
         let mut w = PollWatch::new()?;
         w.watch(dir.path(), Recursion::Recursive)?;
@@ -818,6 +818,68 @@ mod tests {
                 assert_eq!(e.kind, EventKind::Delete);
                 // We can't canonicalize anymore
                 assert!(e.path.ends_with("foo.txt"));
+                // An event for directory modification
+                let e = w.poll_event().unwrap().unwrap();
+                assert_eq!(e.kind, EventKind::Modify);
+                assert_eq!(
+                    fs::canonicalize(e.path)?,
+                    fs::canonicalize(dir.path())?
+                );
+                // No more
+                assert!(w.poll_event().is_none());
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_poll_watch_directory_non_recursive_create_modify_delete_file() -> Result<()> {
+        let dir = fs_temp::directory()?;
+        let mut w = PollWatch::new()?;
+        w.watch(dir.path(), Recursion::NotRecursive)?;
+        w.set_interval(Duration::from_millis(0));
+
+        assert!(w.poll_event().is_none());
+
+        let foo_path = cat_path(dir.path(), "foo.txt");
+        // Create
+        {
+            {
+                thread::sleep(Duration::from_millis(5));
+                create_file_in(dir.path(), "foo.txt")?;
+            }
+            {
+                // An event for directory modification
+                let e = w.poll_event().unwrap().unwrap();
+                assert_eq!(e.kind, EventKind::Modify);
+                assert_eq!(
+                    fs::canonicalize(e.path)?,
+                    fs::canonicalize(dir.path())?
+                );
+                // No more
+                assert!(w.poll_event().is_none());
+            }
+        }
+        // Modify
+        {
+            {
+                thread::sleep(Duration::from_millis(5));
+                let mut f = create_file_in(dir.path(), "foo.txt")?;
+                f.write_all("Hello".as_bytes())?;
+            }
+            {
+                // Nothing
+                assert!(w.poll_event().is_none());
+            }
+        }
+        // Delete
+        {
+            {
+                thread::sleep(Duration::from_millis(5));
+                fs::remove_file(&foo_path)?;
+            }
+            {
                 // An event for directory modification
                 let e = w.poll_event().unwrap().unwrap();
                 assert_eq!(e.kind, EventKind::Modify);
