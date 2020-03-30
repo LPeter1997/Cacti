@@ -822,4 +822,20 @@ mod tests {
         assert!(!path.exists());
         Ok(())
     }
+
+    #[test]
+    fn test_directory_read_write() -> Result<()> {
+        let dir = directory()?;
+        // Read
+        for r in fs::read_dir(dir.path())? {
+            let _ = r?;
+        }
+
+        // Write
+        let mut sub = dir.path().to_path_buf();
+        sub.push("foo.txt");
+        fs::File::create(sub)?;
+
+        Ok(())
+    }
 }

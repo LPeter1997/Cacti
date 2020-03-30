@@ -9,7 +9,6 @@ fn main() -> std::io::Result<()> {
         let dir = fs_temp::directory()?;
         path = dir.path().to_path_buf();
         println!("Temporary created at {:?}", path);
-        assert!(path.exists());
     }
     // It must have been deleted by now
     assert!(!path.exists());
@@ -20,7 +19,6 @@ fn main() -> std::io::Result<()> {
         let dir = fs_temp::directory_in(".")?;
         path = fs::canonicalize(dir.path())?;
         println!("Temporary created at {:?}", path);
-        assert!(path.exists());
     }
     // It must have been deleted by now
     assert!(!path.exists());
@@ -32,7 +30,6 @@ fn main() -> std::io::Result<()> {
         path = fs::canonicalize(dir.path())?;
         assert!(path.ends_with("hello"));
         println!("Temporary created at {:?}", path);
-        assert!(path.exists());
     }
     // It must have been deleted by now
     assert!(!path.exists());

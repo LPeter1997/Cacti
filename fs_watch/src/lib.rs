@@ -1,17 +1,15 @@
-//! A minimalistic, dependency-free, cross-platform filesystem watch library.
+//! Cross-platform utility for monitoring filesystem changes.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use std::collections::{HashMap, VecDeque};
+use std::io::Result;
 use std::fs;
 use std::io;
 
 // ////////////////////////////////////////////////////////////////////////// //
 //                                    API                                     //
 // ////////////////////////////////////////////////////////////////////////// //
-
-/// The `Result` type of this library.
-pub type Result<T> = io::Result<T>;
 
 /// A filesystem watch that can listen to changes in files and folder
 /// structures.
@@ -101,7 +99,7 @@ pub enum Recursion {
 }
 
 /// The filesystem events the `Watch` can detect and produce.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Event {
     /// When the `Event` happened.
     pub time: SystemTime,
@@ -143,10 +141,6 @@ pub enum EventKind {
     /// The watched path has something deleted.
     Delete,
 }
-
-// Choosing the default for the OS.
-#[cfg(target_os = "windows")]      type DefaultWatchImpl = win32::WinApiWatch;
-#[cfg(not(target_os = "windows"))] type DefaultWatchImpl = PollWatch;
 
 /// The default, recommended `Watch` implementation for the platform.
 pub type DefaultWatch = DefaultWatchImpl;
@@ -715,19 +709,62 @@ mod win32 {
     }
 }
 
+// Choosing the default for the OS.
+#[cfg(target_os = "windows")]      type DefaultWatchImpl = win32::WinApiWatch;
+#[cfg(not(target_os = "windows"))] type DefaultWatchImpl = PollWatch;
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path;
 
-    fn create_test_dir() {
-        /*let out_dir = path::PathBuf::from(env!("CARGO_TARGET_DIR"));
-        out_dir.push("test_wd");
-        fs::create_dir(&out_dir);*/
+    fn cat_path(root: &Path, name: &str) -> PathBuf {
+        let mut path = root.to_path_buf();
+        path.push(name);
+        path
+    }
+
+    fn create_file_in(root: &Path, name: &str) -> Result<fs::File> {
+        fs::File::create(cat_path(root, name))
     }
 
     #[test]
-    fn test_null() {
-        create_test_dir();
+    fn test_null_watch() -> Result<()> {
+        let dir = fs_temp::directory()?;
+        let mut w = NullWatch::new()?;
+        w.watch(dir.path(), Recursion::Recursive)?;
+        w.set_interval(Duration::from_millis(0));
+
+        let _f = create_file_in(dir.path(), "foo.txt");
+
+        assert!(w.poll_event().is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_poll_watch_create_modify_delete() -> Result<()> {
+        let dir = fs_temp::directory()?;
+        let mut w = PollWatch::new()?;
+        w.watch(dir.path(), Recursion::Recursive)?;
+        w.set_interval(Duration::from_millis(0));
+
+        println!("{:?}", w.poll_event());
+
+        // Create
+        {
+            { create_file_in(dir.path(), "foo.txt")?; }
+            {
+                let e = w.poll_event().unwrap().unwrap();
+                assert!(w.poll_event().is_none());
+
+                assert_eq!(e.kind, EventKind::Create);
+                assert_eq!(
+                    fs::canonicalize(e.path)?,
+                    fs::canonicalize(cat_path(dir.path(), "foo.txt"))?
+                );
+            }
+        }
+
+        Ok(())
     }
 }
