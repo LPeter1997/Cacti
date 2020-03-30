@@ -610,11 +610,18 @@ mod win32 {
 
 #[cfg(target_family = "unix")]
 mod unix {
+    use std::os::unix::ffi::OsStrExt;
     use super::*;
 
     #[link(name = "c")]
     extern "C" {
         fn getpid() -> i32;
+        fn unlink(pathname: *const u8);
+    }
+
+    /// Converts the Rust &OsStr into a C conar*.
+    fn to_cstring(s: &OsStr) -> Vec<u8> {
+        s.as_bytes().iter().chain(Some(0).into_iter()).collect()
     }
 
     /// `trait FsTemp` on Unix systems.
@@ -628,7 +635,12 @@ mod unix {
         }
 
         fn temp_file(path: &Path) -> Result<fs::File> {
-            panic!("TODO UNIX")
+            let f = fs::OpenOptions::new()
+                .create_new(true)
+                .read(true).write(true)
+                .open(path)?;
+            let cpath = to_cstring(path);
+            unsafe { unlink(cpath.as_ptr()) };
         }
 
         fn temp_dir(path: &Path) -> Result<Self::Directory> {
