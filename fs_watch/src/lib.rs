@@ -850,8 +850,13 @@ mod tests {
         // Replace with file
         let f = fs_temp::file_at(&dir_path)?;
         println!("NEW FILE: {:?}", f.path());
-        println!("IS IT A FILE: {:?}", f.path().unwrap().is_file());
-        println!("IS IT A DIRECTORY: {:?}", f.path().unwrap().is_dir());
+        let mut p = f.path().unwrap().into_os_string().into_string().unwrap();
+        if p.ends_with(" (deleted)") {
+            p = p[0..(p.len() - " (deleted)".len())].into();
+        }
+        let p = PathBuf::from(&p);
+        println!("IS IT A FILE: {:?}", p.is_file());
+        println!("IS IT A DIRECTORY: {:?}", p.is_dir());
 
         // An event for directory deletion
         let e = w.poll_event().unwrap().unwrap();
