@@ -28,7 +28,7 @@ use std::io;
 /// platform:
 ///
 /// ```no_run
-/// use fs_watch::*;
+/// use cacti_fs::watch::*;
 /// use std::time::Duration;
 ///
 /// # fn main() -> std::io::Result<()> {
@@ -494,6 +494,7 @@ impl FileState {
 
 // WinAPI, ReadDirectoryChangesW  //////////////////////////////////////////////
 
+// TODO: Finish at least the WinAPI implementation
 #[cfg(target_os = "windows")]
 mod win32 {
     #![allow(non_snake_case)]
@@ -726,6 +727,7 @@ mod tests {
     use super::*;
     use std::thread;
     use std::io::Write;
+    use crate::temp;
 
     // NOTE: We could move this to public space
     macro_rules! join {
@@ -740,7 +742,7 @@ mod tests {
 
     #[test]
     fn test_null_watch() -> Result<()> {
-        let dir = fs_temp::directory()?;
+        let dir = temp::directory()?;
         let mut w = NullWatch::new()?;
         w.watch(dir.path(), Recursion::Recursive)?;
         w.set_interval(Duration::from_millis(0));
@@ -755,7 +757,7 @@ mod tests {
     #[test]
     fn test_poll_watch_directory_created_deleted() -> Result<()> {
         let mut w = PollWatch::new()?;
-        let dir_path = fs_temp::path_in(".", None)?;
+        let dir_path = temp::path_in(".", None)?;
         w.watch(&dir_path, Recursion::NotRecursive)?;
         w.set_interval(Duration::from_millis(0));
 
@@ -763,7 +765,7 @@ mod tests {
 
         {
             thread::sleep(Duration::from_millis(5));
-            let _dir = fs_temp::directory_at(&dir_path)?;
+            let _dir = temp::directory_at(&dir_path)?;
 
             // An event for directory creation
             let e = w.poll_event().unwrap().unwrap();
@@ -791,14 +793,14 @@ mod tests {
     #[test]
     fn test_poll_watch_directory_deleted_created() -> Result<()> {
         let mut w = PollWatch::new()?;
-        let dir_path = fs_temp::path_in(".", None)?;
+        let dir_path = temp::path_in(".", None)?;
         w.set_interval(Duration::from_millis(0));
 
         assert!(w.poll_event().is_none());
 
         {
             thread::sleep(Duration::from_millis(5));
-            let _dir = fs_temp::directory_at(&dir_path)?;
+            let _dir = temp::directory_at(&dir_path)?;
 
             w.watch(&dir_path, Recursion::NotRecursive)?;
 
@@ -816,7 +818,7 @@ mod tests {
 
         // Re-create
         thread::sleep(Duration::from_millis(5));
-        let _dir = fs_temp::directory_at(&dir_path)?;
+        let _dir = temp::directory_at(&dir_path)?;
         // An event for directory creation
         let e = w.poll_event().unwrap().unwrap();
         assert_eq!(e.kind, EventKind::Create);
@@ -833,14 +835,14 @@ mod tests {
     #[test]
     fn test_poll_watch_directory_directory_to_file() -> Result<()> {
         let mut w = PollWatch::new()?;
-        let dir_path = fs_temp::path_in(".", None)?;
+        let dir_path = temp::path_in(".", None)?;
         w.set_interval(Duration::from_millis(0));
 
         assert!(w.poll_event().is_none());
 
         {
             thread::sleep(Duration::from_millis(5));
-            let _dir = fs_temp::directory_at(&dir_path)?;
+            let _dir = temp::directory_at(&dir_path)?;
 
             w.watch(&dir_path, Recursion::NotRecursive)?;
 
@@ -873,14 +875,14 @@ mod tests {
     #[test]
     fn test_poll_watch_filled_directory_directory_to_file() -> Result<()> {
         let mut w = PollWatch::new()?;
-        let dir_path = fs_temp::path_in(".", None)?;
+        let dir_path = temp::path_in(".", None)?;
         w.set_interval(Duration::from_millis(0));
 
         assert!(w.poll_event().is_none());
 
         {
             thread::sleep(Duration::from_millis(5));
-            let _dir = fs_temp::directory_at(&dir_path)?;
+            let _dir = temp::directory_at(&dir_path)?;
             // Add an inner file
             let _f = fs::File::create(join!(&dir_path, "foo.txt"));
 
@@ -921,7 +923,7 @@ mod tests {
     #[test]
     fn test_poll_watch_directory_file_to_directory() -> Result<()> {
         let mut w = PollWatch::new()?;
-        let dir_path = fs_temp::path_in(".", None)?;
+        let dir_path = temp::path_in(".", None)?;
         w.set_interval(Duration::from_millis(0));
 
         assert!(w.poll_event().is_none());
@@ -938,7 +940,7 @@ mod tests {
             fs::remove_file(&dir_path)?;
         }
         // Replace with directory
-        let _f = fs_temp::directory_at(&dir_path)?;
+        let _f = temp::directory_at(&dir_path)?;
 
         // An event for file deletion
         let e = w.poll_event().unwrap().unwrap();
@@ -962,7 +964,7 @@ mod tests {
     #[test]
     fn test_poll_watch_directory_file_to_directory_filled() -> Result<()> {
         let mut w = PollWatch::new()?;
-        let dir_path = fs_temp::path_in(".", None)?;
+        let dir_path = temp::path_in(".", None)?;
         w.set_interval(Duration::from_millis(0));
 
         assert!(w.poll_event().is_none());
@@ -979,7 +981,7 @@ mod tests {
             fs::remove_file(&dir_path)?;
         }
         // Replace with directory
-        let _f = fs_temp::directory_at(&dir_path)?;
+        let _f = temp::directory_at(&dir_path)?;
         // Add a file inside too
         let _f = fs::File::create(join!(&dir_path, "foo.txt"))?;
 
@@ -1011,7 +1013,7 @@ mod tests {
 
     #[test]
     fn test_poll_watch_directory_recursive_create_modify_delete_file() -> Result<()> {
-        let dir = fs_temp::directory()?;
+        let dir = temp::directory()?;
         let mut w = PollWatch::new()?;
         w.watch(dir.path(), Recursion::Recursive)?;
         w.set_interval(Duration::from_millis(0));
@@ -1092,7 +1094,7 @@ mod tests {
 
     #[test]
     fn test_poll_watch_directory_non_recursive_create_modify_delete_file() -> Result<()> {
-        let dir = fs_temp::directory()?;
+        let dir = temp::directory()?;
         let mut w = PollWatch::new()?;
         w.watch(dir.path(), Recursion::NotRecursive)?;
         w.set_interval(Duration::from_millis(0));

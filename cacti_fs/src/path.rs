@@ -15,7 +15,7 @@
 //! ```no_run
 //! use std::fs::File;
 //! use std::path::PathBuf;
-//! use fs_path::FilePath;
+//! use cacti_fs::path::FilePath;
 //!
 //! # fn main() -> std::io::Result<()> {
 //! let file = File::create("C:/TMP/foo.txt")?;
@@ -59,7 +59,7 @@ pub trait FilePath {
     /// ```no_run
     /// use std::fs::File;
     /// use std::path::PathBuf;
-    /// use fs_path::FilePath;
+    /// use cacti_fs::path::FilePath;
     ///
     /// # fn main() -> std::io::Result<()> {
     /// let file = File::create("C:/TMP/foo.txt")?;

@@ -2,7 +2,7 @@
 
 use std::fs;
 use std::ffi::OsStr;
-use fs_path::FilePath;
+use cacti_fs::path::FilePath;
 
 fn main() -> std::io::Result<()> {
     let f = fs::File::create("test.txt")?;

@@ -1,6 +1,6 @@
 
 use std::time::Duration;
-use fs_watch::*;
+use cacti_fs::watch::*;
 
 fn main() {
     /*let mut watch = PollWatch::new().expect("Couldn't create watch!");

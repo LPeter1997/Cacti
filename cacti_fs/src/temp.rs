@@ -126,9 +126,10 @@ use std::fs;
 ///
 /// ```no_run
 /// use std::fs;
+/// use cacti_fs::temp;
 ///
 /// # fn main() -> std::io::Result<()> {
-/// let temp_dir_path = fs_temp::path(None)?;
+/// let temp_dir_path = temp::path(None)?;
 /// fs::create_dir(&temp_dir_path)?;
 /// // Now we can work inside temp_dir_path!
 /// # Ok(())
@@ -139,9 +140,10 @@ use std::fs;
 ///
 /// ```no_run
 /// use std::fs;
+/// use cacti_fs::temp;
 ///
 /// # fn main() -> std::io::Result<()> {
-/// let temp_file_path = fs_temp::path(Some("txt"))?;
+/// let temp_file_path = temp::path(Some("txt"))?;
 /// let temp_file = fs::File::create(&temp_file_path)?;
 /// // Now we can write to temp_file!
 /// # Ok(())
@@ -174,9 +176,10 @@ pub fn path(extension: Option<&str>) -> Result<PathBuf> {
 ///
 /// ```no_run
 /// use std::fs;
+/// use cacti_fs::temp;
 ///
 /// # fn main() -> std::io::Result<()> {
-/// let temp_dir_path = fs_temp::path_in("C:/TMP", None)?;
+/// let temp_dir_path = temp::path_in("C:/TMP", None)?;
 /// fs::create_dir(&temp_dir_path)?;
 /// // Now we can work inside temp_dir_path!
 /// # Ok(())
@@ -187,9 +190,10 @@ pub fn path(extension: Option<&str>) -> Result<PathBuf> {
 ///
 /// ```no_run
 /// use std::fs;
+/// use cacti_fs::temp;
 ///
 /// # fn main() -> std::io::Result<()> {
-/// let temp_file_path = fs_temp::path_in("C:/TMP", Some("txt"))?;
+/// let temp_file_path = temp::path_in("C:/TMP", Some("txt"))?;
 /// let temp_file = fs::File::create(&temp_file_path)?;
 /// // Now we can write to temp_file!
 /// # Ok(())
@@ -216,9 +220,10 @@ pub fn path_in(root: impl AsRef<Path>, extension: Option<&str>) -> Result<PathBu
 ///
 /// ```no_run
 /// use std::io::Write;
+/// use cacti_fs::temp;
 ///
 /// # fn main() -> std::io::Result<()> {
-/// let mut file = fs_temp::file(Some("txt"))?;
+/// let mut file = temp::file(Some("txt"))?;
 /// // Now we can write to the file!
 /// file.write_all("Hello, World!".as_bytes())?;
 /// # Ok(())
@@ -243,9 +248,10 @@ pub fn file(extension: Option<&str>) -> Result<fs::File> {
 ///
 /// ```no_run
 /// use std::io::Write;
+/// use cacti_fs::temp;
 ///
 /// # fn main() -> std::io::Result<()> {
-/// let mut file = fs_temp::file_in("C:/TMP", Some("txt"))?;
+/// let mut file = temp::file_in("C:/TMP", Some("txt"))?;
 /// // Now we can write to the file!
 /// file.write_all("Hello, World!".as_bytes())?;
 /// # Ok(())
@@ -268,10 +274,11 @@ pub fn file_in(root: impl AsRef<Path>, extension: Option<&str>) -> Result<fs::Fi
 ///
 /// ```no_run
 /// use std::io::Write;
+/// use cacti_fs::temp;
 ///
 /// # fn main() -> std::io::Result<()> {
 /// {
-///     let mut file = fs_temp::file_at("test.txt")?;
+///     let mut file = temp::file_at("test.txt")?;
 ///     // Now we can write to the file!
 ///     file.write_all("Hello, World!".as_bytes())?;
 /// }
@@ -296,8 +303,10 @@ pub fn file_at(full_path: impl AsRef<Path>) -> Result<fs::File> {
 /// Creating a temporary directory:
 ///
 /// ```no_run
+/// use cacti_fs::temp;
+///
 /// # fn main() -> std::io::Result<()> {
-/// let dir = fs_temp::directory()?;
+/// let dir = temp::directory()?;
 /// // We can work inside the directory now!
 /// # Ok(())
 /// # }
@@ -319,8 +328,10 @@ pub fn directory() -> Result<Directory> {
 /// Creating a temporary directory inside `C:/TMP`, assuming it exists:
 ///
 /// ```no_run
+/// use cacti_fs::temp;
+///
 /// # fn main() -> std::io::Result<()> {
-/// let dir = fs_temp::directory_in("C:/TMP")?;
+/// let dir = temp::directory_in("C:/TMP")?;
 /// // We can work inside the directory now!
 /// # Ok(())
 /// # }
@@ -341,9 +352,11 @@ pub fn directory_in(root: impl AsRef<Path>) -> Result<Directory> {
 /// Creating a temporary directory named `cache`:
 ///
 /// ```no_run
+/// use cacti_fs::temp;
+///
 /// # fn main() -> std::io::Result<()> {
 /// {
-///     let dir = fs_temp::directory_at("cache")?;
+///     let dir = temp::directory_at("cache")?;
 ///     // We can work inside the directory now!
 /// }
 /// // Here the directory is deleted!
@@ -721,7 +734,7 @@ mod unix {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fs_path::FilePath;
+    use crate::path::FilePath;
     use std::ffi::{OsStr, OsString};
 
     fn starts_with(s: &OsStr, pat: &str) -> bool {
