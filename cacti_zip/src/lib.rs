@@ -145,8 +145,8 @@ impl FileHeader {
         let file_name = string_decode(&b[0..file_name_len]);
         let b = &b[file_name_len..];
         let extra = &b[0..extra_len];
-        let (extra, _consumed) = ExtraField::parse_vec(extra);
-        // assert_eq!(_consumed, extra_len);
+        let (extra, _ec) = ExtraField::parse_vec(extra);
+        // assert_eq!(_ec, extra_len);
         let b = &b[extra_len..];
         let file_comment = string_decode(&b[0..file_comment_len]);
         // All good
@@ -219,27 +219,116 @@ impl ExtraField {
     }
 }
 
+// local file header ///////////////////////////////////////////////////////////
+
+#[derive(Debug)]
+struct LocalFileHeader {
+    version_needed       : u16            ,
+    flags                : u16            ,
+    compression          : u16            ,
+    mod_time             : u16            ,
+    mod_date             : u16            ,
+    crc32                : u32            ,
+    compressed_size      : usize          ,
+    uncompressed_size    : usize          ,
+    file_name            : String         ,
+    extra                : Vec<ExtraField>,
+}
+
+impl LocalFileHeader {
+    /// Parses the bytes into a `LocalFileHeader` structure. If succeeded,
+    /// returns the read in structure and the number of bytes read.
+    fn parse(b: &[u8]) -> Option<(Self, usize)> {
+        // Make sure to have enough bytes
+        if b.len() < 30 {
+            return None;
+        }
+        // Signature must be 0x02014b50
+        let signature = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+        if signature != 0x04034b50 {
+            return None;
+        }
+        // Read fixed size
+        let version_needed = u16::from_le_bytes([b[4], b[5]]);
+        let flags = u16::from_le_bytes([b[6], b[7]]);
+        let compression = u16::from_le_bytes([b[8], b[9]]);
+        let mod_time = u16::from_le_bytes([b[10], b[11]]);
+        let mod_date = u16::from_le_bytes([b[12], b[13]]);
+        let crc32 = u32::from_le_bytes([b[14], b[15], b[16], b[17]]);
+        let compressed_size = u32::from_le_bytes([b[18], b[19], b[20], b[21]]) as usize;
+        let uncompressed_size = u32::from_le_bytes([b[22], b[23], b[24], b[25]]) as usize;
+        let file_name_len = u16::from_le_bytes([b[26], b[27]]) as usize;
+        let extra_len = u16::from_le_bytes([b[28], b[29]]) as usize;
+        // Check if enough for variable
+        let b = &b[30..];
+        if b.len() < file_name_len + extra_len {
+            return None;
+        }
+        // Enough, read
+        let is_utf8 = (flags & (1 << 11)) != 0;
+        let file_name = &b[0..file_name_len];
+        let file_name = if is_utf8 { decode_utf8(file_name) } else { decode_cp437(file_name) };
+        let b = &b[file_name_len..];
+        let extra = &b[0..extra_len];
+        let (extra, _ec) = ExtraField::parse_vec(extra);
+        // assert_eq!(_ec, extra_len);
+        // All good
+        let consumed = 30 + file_name_len + extra_len;
+        let result = Self{
+            version_needed,
+            flags,
+            compression,
+            mod_time,
+            mod_date,
+            crc32,
+            compressed_size,
+            uncompressed_size,
+            file_name,
+            extra,
+        };
+        Some((result, consumed))
+    }
+}
+
 // Parsing an archive //////////////////////////////////////////////////////////
 
 fn parse_archive(b: &[u8]) {
     // First find the 'end of central directory record'
-    if let Some((end, offs)) = EndOfCentralDirectoryRecord::find(b) {
-        // TODO: Zip64
-        let is_zip64 = false;
-
-        let mut current_offs = end.central_dir_offset as usize;
-        for _ in 0..end.total_entries_in_central_dir {
-            if let Some((header, offs)) = FileHeader::parse(&b[current_offs..]) {
-                println!("HEADER: {:?}", header);
-                current_offs += offs;
+    let end_record = EndOfCentralDirectoryRecord::find(b);
+    if end_record.is_none() {
+        println!("No end record");
+        return;
+    }
+    let (end_record, _) = end_record.unwrap();
+    // TODO: Zip64
+    // let is_zip64 = false;
+    // Parse central directory entries
+    let mut dir_entries = Vec::new();
+    {
+        let mut offset = end_record.central_dir_offset as usize;
+        for _ in 0..end_record.total_entries_in_central_dir {
+            let header = FileHeader::parse(&b[offset..]);
+            if header.is_none() {
+                println!("Corrupt directory entry");
+                return;
             }
-            else {
-                println!("Big oof");
-            }
+            let (header, offs) = header.unwrap();
+            offset += offs;
+            dir_entries.push(header);
         }
     }
-    else {
-        println!("Could not find end!");
+
+    // For now we just match local headers
+    for e in &dir_entries {
+        let hoffs = e.local_header_offset as usize;
+        let sub = &b[hoffs..];
+        if let Some((loc, _)) = LocalFileHeader::parse(sub) {
+            println!("Directory header: {:?}", e);
+            println!("Local header: {:?}", loc);
+        }
+        else {
+            println!("BIG OOF");
+        }
     }
 }
 
@@ -299,7 +388,7 @@ fn decode_cp437(bs: &[u8]) -> String {
 pub fn test(path: impl AsRef<Path>) {
     let mut f = fs::File::open(path).unwrap();
     let mut buffer = Vec::new();
-    f.read_to_end(&mut buffer);
+    f.read_to_end(&mut buffer).expect("REE");
 
     parse_archive(&buffer);
 }
