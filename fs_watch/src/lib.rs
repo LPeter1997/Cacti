@@ -892,18 +892,68 @@ mod tests {
         // Replace with directory
         let _f = fs_temp::directory_at(&dir_path)?;
 
-        // An event for directory deletion
+        // An event for file deletion
         let e = w.poll_event().unwrap().unwrap();
         assert_eq!(e.kind, EventKind::Delete);
         // We can't canonicalize
         assert!(e.path.ends_with(&dir_path));
 
-        // An event for file-creation
+        // An event for directory-creation
         let e = w.poll_event().unwrap().unwrap();
         assert_eq!(e.kind, EventKind::Create);
         assert_eq!(
             fs::canonicalize(e.path)?,
             fs::canonicalize(&dir_path)?
+        );
+        // No more
+        assert!(w.poll_event().is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_poll_watch_directory_file_to_directory_filled() -> Result<()> {
+        let mut w = PollWatch::new()?;
+        let dir_path = fs_temp::path_in(".", None)?;
+        w.set_interval(Duration::from_millis(0));
+
+        assert!(w.poll_event().is_none());
+
+        {
+            thread::sleep(Duration::from_millis(5));
+            let _dir = fs::File::create(&dir_path)?;
+
+            w.watch(&dir_path, Recursion::Recursive)?;
+
+            assert!(w.poll_event().is_none());
+
+            thread::sleep(Duration::from_millis(5));
+            fs::remove_file(&dir_path)?;
+        }
+        // Replace with directory
+        let _f = fs_temp::directory_at(&dir_path)?;
+        // Add a file inside too
+        let _f = fs::File::create(join!(&dir_path, "foo.txt"))?;
+
+        // An event for file deletion
+        let e = w.poll_event().unwrap().unwrap();
+        assert_eq!(e.kind, EventKind::Delete);
+        // We can't canonicalize
+        assert!(e.path.ends_with(&dir_path));
+
+        // An event for directory-creation
+        let e = w.poll_event().unwrap().unwrap();
+        assert_eq!(e.kind, EventKind::Create);
+        assert_eq!(
+            fs::canonicalize(e.path)?,
+            fs::canonicalize(&dir_path)?
+        );
+        // An event for inner-file-creation
+        let e = w.poll_event().unwrap().unwrap();
+        assert_eq!(e.kind, EventKind::Create);
+        assert_eq!(
+            fs::canonicalize(e.path)?,
+            fs::canonicalize(join!(&dir_path, "foo.txt"))?
         );
         // No more
         assert!(w.poll_event().is_none());
