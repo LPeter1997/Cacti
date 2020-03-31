@@ -850,6 +850,7 @@ mod tests {
         // Replace with file
         let f = fs_temp::file_at(&dir_path)?;
         println!("NEW FILE: {:?}", f.path());
+        println!("IS IT A FILE: {:?}", f.path().unwrap().is_file());
 
         // An event for directory deletion
         let e = w.poll_event().unwrap().unwrap();
