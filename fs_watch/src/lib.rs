@@ -880,11 +880,14 @@ mod tests {
 
         {
             thread::sleep(Duration::from_millis(5));
-            let _dir = fs_temp::file_at(&dir_path)?;
+            let dir = fs::File::create(&dir_path)?;
 
             w.watch(&dir_path, Recursion::NotRecursive)?;
 
             assert!(w.poll_event().is_none());
+
+            thread::sleep(Duration::from_millis(5));
+            fs::remove_file(&dir_path)?;
         }
         // Replace with directory
         let _f = fs_temp::directory_at(&dir_path)?;
