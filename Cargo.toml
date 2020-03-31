@@ -2,4 +2,5 @@
 
 members = [
     "cacti_fs",
+    "cacti_zip",
 ]
