@@ -727,15 +727,15 @@ mod tests {
     use std::thread;
     use std::io::Write;
 
-    // TODO: Would make a nice macro
-    fn cat_path(root: &Path, name: &str) -> PathBuf {
-        let mut path = root.to_path_buf();
-        path.push(name);
-        path
-    }
-
-    fn create_file_in(root: &Path, name: &str) -> Result<fs::File> {
-        fs::File::create(cat_path(root, name))
+    // NOTE: We could move this to public space
+    macro_rules! join {
+        ( $( $p:expr ),* ) => {{
+            let mut result = ::std::path::PathBuf::new();
+            $(
+                result.push($p);
+            )*
+            result
+        }};
     }
 
     #[test]
@@ -745,7 +745,7 @@ mod tests {
         w.watch(dir.path(), Recursion::Recursive)?;
         w.set_interval(Duration::from_millis(0));
 
-        let _f = create_file_in(dir.path(), "foo.txt");
+        let _f = fs::File::create(join!(dir.path(), "foo.txt"))?;
 
         assert!(w.poll_event().is_none());
 
@@ -880,7 +880,7 @@ mod tests {
 
         {
             thread::sleep(Duration::from_millis(5));
-            let dir = fs::File::create(&dir_path)?;
+            let _dir = fs::File::create(&dir_path)?;
 
             w.watch(&dir_path, Recursion::NotRecursive)?;
 
@@ -920,12 +920,12 @@ mod tests {
 
         assert!(w.poll_event().is_none());
 
-        let foo_path = cat_path(dir.path(), "foo.txt");
+        let foo_path = join!(dir.path(), "foo.txt");
         // Create
         {
             {
                 thread::sleep(Duration::from_millis(5));
-                create_file_in(dir.path(), "foo.txt")?;
+                fs::File::create(join!(dir.path(), "foo.txt"))?;
             }
             {
                 // An event for file creation
@@ -950,7 +950,7 @@ mod tests {
         {
             {
                 thread::sleep(Duration::from_millis(5));
-                let mut f = create_file_in(dir.path(), "foo.txt")?;
+                let mut f = fs::File::create(join!(dir.path(), "foo.txt"))?;
                 f.write_all("Hello".as_bytes())?;
             }
             {
@@ -1001,12 +1001,12 @@ mod tests {
 
         assert!(w.poll_event().is_none());
 
-        let foo_path = cat_path(dir.path(), "foo.txt");
+        let foo_path = join!(dir.path(), "foo.txt");
         // Create
         {
             {
                 thread::sleep(Duration::from_millis(5));
-                create_file_in(dir.path(), "foo.txt")?;
+                fs::File::create(join!(dir.path(), "foo.txt"))?;
             }
             {
                 // An event for directory modification
@@ -1024,7 +1024,7 @@ mod tests {
         {
             {
                 thread::sleep(Duration::from_millis(5));
-                let mut f = create_file_in(dir.path(), "foo.txt")?;
+                let mut f = fs::File::create(join!(dir.path(), "foo.txt"))?;
                 f.write_all("Hello".as_bytes())?;
             }
             {
