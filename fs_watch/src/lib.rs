@@ -726,6 +726,7 @@ mod tests {
     use super::*;
     use std::thread;
     use std::io::Write;
+    use fs_path::FilePath;
 
     // TODO: Would make a nice macro
     fn cat_path(root: &Path, name: &str) -> PathBuf {
@@ -847,8 +848,8 @@ mod tests {
             assert!(w.poll_event().is_none());
         }
         // Replace with file
-        thread::sleep(Duration::from_millis(5));
-        let _f = fs_temp::file_at(&dir_path)?;
+        let f = fs_temp::file_at(&dir_path)?;
+        println!("NEW FILE: {:?}", f.path());
 
         // An event for directory deletion
         let e = w.poll_event().unwrap().unwrap();
@@ -886,7 +887,6 @@ mod tests {
             assert!(w.poll_event().is_none());
         }
         // Replace with directory
-        thread::sleep(Duration::from_millis(5));
         let _f = fs_temp::directory_at(&dir_path)?;
 
         // An event for directory deletion
