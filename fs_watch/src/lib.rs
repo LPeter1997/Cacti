@@ -871,6 +871,54 @@ mod tests {
     }
 
     #[test]
+    fn test_poll_watch_filled_directory_directory_to_file() -> Result<()> {
+        let mut w = PollWatch::new()?;
+        let dir_path = fs_temp::path_in(".", None)?;
+        w.set_interval(Duration::from_millis(0));
+
+        assert!(w.poll_event().is_none());
+
+        {
+            thread::sleep(Duration::from_millis(5));
+            let _dir = fs_temp::directory_at(&dir_path)?;
+            // Add an inner file
+            let _f = fs::File::create(join!(&dir_path, "foo.txt"));
+
+            w.watch(&dir_path, Recursion::Recursive)?;
+
+            assert!(w.poll_event().is_none());
+        }
+        // Replace with file
+        let _f = fs::File::create(&dir_path)?;
+
+        // An event for file deletion
+        let e = w.poll_event().unwrap().unwrap();
+        assert_eq!(e.kind, EventKind::Delete);
+        // We can't canonicalize
+        assert!(e.path.ends_with("foo.txt"));
+
+        // An event for directory deletion
+        let e = w.poll_event().unwrap().unwrap();
+        assert_eq!(e.kind, EventKind::Delete);
+        // We can't canonicalize
+        assert!(e.path.ends_with(&dir_path));
+
+        // An event for file-creation
+        let e = w.poll_event().unwrap().unwrap();
+        assert_eq!(e.kind, EventKind::Create);
+        assert_eq!(
+            fs::canonicalize(e.path)?,
+            fs::canonicalize(&dir_path)?
+        );
+        // No more
+        assert!(w.poll_event().is_none());
+
+        fs::remove_file(&dir_path)?;
+
+        Ok(())
+    }
+
+    #[test]
     fn test_poll_watch_directory_file_to_directory() -> Result<()> {
         let mut w = PollWatch::new()?;
         let dir_path = fs_temp::path_in(".", None)?;
