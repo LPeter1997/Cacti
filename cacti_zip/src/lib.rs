@@ -1,24 +1,69 @@
 
 use std::path::Path;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::collections::HashMap;
 use std::fs;
 use std::io;
 
-// Some minimal parser abstraction
+/// The internal reader.
+#[derive(Debug)]
+struct ByteReader<R: Read + Seek> {
+    reader: R,
+    length: usize,
+    offset: usize,
+}
 
+impl <R: Read + Seek> ByteReader<R> {
+    /// Tries to create a new `ByteReader` from an underlying reader.
+    fn new(reader: R) -> io::Result<Self> {
+        // Calculate stream len
+        let current = reader.seek(SeekFrom::Current(0))?;
+        let length = reader.seek(SeekFrom::End(0))? as usize;
+        reader.seek(SeekFrom::Start(current))?;
+        Ok(Self{ reader, length, offset: 0 })
+    }
+
+    /// Sets the current offset for this reader.
+    fn set_offset(&self, offset: usize) -> io::Result<()> {
+        self.reader.seek(SeekFrom::Start(offset as u64))?;
+        self.offset = offset;
+        Ok(())
+    }
+
+    /// Returns the current offset of this reader.
+    fn offset(&self) -> usize { self.offset }
+
+    /// Returns the total length of this reader.
+    fn total_len(&self) -> usize { self.length }
+
+    /// Returns the remaining length of this reader.
+    fn rem_len(&self) -> usize { self.length - self.offset }
+}
+
+/// The kinds of signature a zip structure can have.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Signature {
+    /// No signature.
     None,
+    /// Required signature.
     Required(u32),
+    /// A signature that's may be present.
     Optional(u32),
 }
 
+/// A trait for every zip structure for a common parsing interface.
 trait Parse: Sized {
-    const FIX_LEN  : usize;
+    /// The type of signature this structure has.
     const SIGNATURE: Signature;
+    /// The least number of bytes this structure needs to fit (fixed-size
+    /// bytes).
+    const FIX_LEN: usize;
 
-    fn parse(b: &[u8]) -> io::Result<(Self, usize)> {
+    // TODO: Finish
+
+    /// Tries to parse this structure from the given bytes. The offset of the
+    /// reader will be reset, if the parse wasn't successful.
+    fn parse(b: &mut (impl Seek + Read)) -> io::Result<(Self, usize)> {
         match Self::SIGNATURE {
             Signature::None => {
                 // Check if fix length is in range
@@ -38,7 +83,8 @@ trait Parse: Sized {
                 // Check signature
                 let s = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
                 if s != signature {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, "Wrong signature!"));
+                    return Err(io::Error::new(io::ErrorKind::InvalidData,
+                        "Wrong signature!"));
                 }
                 let (result, consumed) = Self::parse_internal(&b[4..])?;
                 Ok((result, Self::FIX_LEN + consumed + 4))
@@ -46,7 +92,16 @@ trait Parse: Sized {
             Signature::Optional(signature) => {
                 // Check if signarute and fix length are in range
                 let could_have_signature = b.len() >= Self::FIX_LEN + 4;
-                unimplemented!();
+                if b.len() >= Self::FIX_LEN + 4 {
+                    // Check signature
+                    let s = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+                    if s == signature {
+                        let (result, consumed) = Self::parse_internal(&b[4..])?;
+                        return Ok((result, Self::FIX_LEN + consumed + 4));
+                    }
+                }
+                let (result, consumed) = Self::parse_internal(b)?;
+                Ok((result, Self::FIX_LEN + consumed))
             }
         }
     }
@@ -54,40 +109,30 @@ trait Parse: Sized {
     fn parse_internal(b: &[u8]) -> io::Result<(Self, usize)>;
 }
 
-// end of central directory record /////////////////////////////////////////////
-
+/// The primary structure we locate for an archive.
+/// Specification 4.3.16.
+#[repr(C)]
 #[derive(Debug)]
 struct EndOfCentralDirectoryRecord {
-    disk_number                 : u16    ,
-    central_dir_start_disk      : u16    ,
-    entries_on_this_disk        : u16    ,
-    total_entries_in_central_dir: u16    ,
-    central_dir_size            : u32    ,
-    central_dir_offset          : u32    ,
-    comment                     : Vec<u8>,
+    disk_number           : u16    ,
+    central_dir_start_disk: u16    ,
+    entries_on_this_disk  : u16    ,
+    entries_in_central_dir: u16    ,
+    central_dir_size      : u32    ,
+    central_dir_offset    : u32    ,
+    comment               : Vec<u8>,
 }
 
-impl EndOfCentralDirectoryRecord {
-    /// The minimum offset backwards to search for.
-    const MIN_BYTES: usize = 22;
+impl Parse for EndOfCentralDirectoryRecord {
+    const SIGNATURE: Signature = Signature::Required(0x06054b50);
+    const FIX_LEN: usize = 18;
 
-    /// Parses the bytes into a `EndOfCentralDirectoryRecord` structure. If
-    /// succeeded, returns the read in structure and the number of bytes read.
-    fn parse(b: &[u8]) -> io::Result<(Self, usize)> {
-        // At least 22 bytes without variable fields
-        if b.len() < Self::MIN_BYTES {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Not enough bytes!"));
-        }
-        // Signature must be 0x06054b50
-        let signature = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
-        if signature != 0x06054b50 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "Wrong signature!"));
-        }
-        // Read in the rest of the things freely, until variable size
+    fn parse_internal(b: &[u8]) -> io::Result<(Self, usize)> {
+        // Fix-size
         let disk_number = u16::from_le_bytes([b[4], b[5]]);
         let central_dir_start_disk = u16::from_le_bytes([b[6], b[7]]);
         let entries_on_this_disk = u16::from_le_bytes([b[8], b[9]]);
-        let total_entries_in_central_dir = u16::from_le_bytes([b[10], b[11]]);
+        let entries_in_central_dir = u16::from_le_bytes([b[10], b[11]]);
         let central_dir_size = u32::from_le_bytes([b[12], b[13], b[14], b[15]]);
         let central_dir_offset = u32::from_le_bytes([b[16], b[17], b[18], b[19]]);
         let comment_len = u16::from_le_bytes([b[20], b[21]]) as usize;
@@ -97,29 +142,25 @@ impl EndOfCentralDirectoryRecord {
             return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Not enough bytes!"));
         }
         let comment = Vec::from(&b[0..comment_len]);
-        // All good
-        let consumed = Self::MIN_BYTES + comment_len;
         let result = Self{
             disk_number,
             central_dir_start_disk,
             entries_on_this_disk,
-            total_entries_in_central_dir,
+            entries_in_central_dir,
             central_dir_size,
             central_dir_offset,
             comment,
         };
-        Ok((result, consumed))
+        Ok((result, comment_len))
     }
+}
 
+impl EndOfCentralDirectoryRecord {
     /// Tries to find the `EndOfCentralDirectoryRecord`. On success returns it
     /// with it's starting offset.
     fn find(b: &[u8]) -> io::Result<(Self, usize)> {
-        if b.len() < Self::MIN_BYTES {
-            // Invalid
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Not enough bytes!"));
-        }
         // Go backwards
-        let mut offset = b.len() - EndOfCentralDirectoryRecord::MIN_BYTES;
+        let mut offset = b.len() - Self::FIX_LEN;
         loop {
             let sub_b = &b[offset..];
             if let Ok((r, _)) = EndOfCentralDirectoryRecord::parse(sub_b) {
