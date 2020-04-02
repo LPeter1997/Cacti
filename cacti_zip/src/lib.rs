@@ -96,6 +96,12 @@ impl <R: Read> BitReader<R> {
         self.bit_index = (self.bit_index + 1) % 8;
         Ok(bit)
     }
+
+    /// Skips to the start of next byte. If already on a byte-boundlary, this is
+    /// a no-op.
+    fn skip_to_byte(&mut self) {
+        self.bit_index = 0;
+    }
 }
 
 /// The kinds of signature a zip structure can have.
@@ -490,20 +496,22 @@ impl <R: Read + Seek> ZipArchive<R> {
     }
 }
 
+/// The maximum code-length in bits allowed by DEFLATE.
+const DEFLATE_MAX_BITS: usize = 15;
+
 /// A type for implementing the DEFLATE decompression algorithm.
 #[derive(Debug)]
 struct Deflate<R: Read> {
-    reader: io::Take<R>,
-    dict: HashMap<u16, u8>,
+    reader: BitReader<io::Take<R>>,
+    //dict: HashMap<u16, u8>,
 }
 
 impl <R: Read> Deflate<R> {
     /// Creates a new `Deflate` structure from the given reader reference and
     /// length limit.
-    fn new(reader: &mut R, length: usize) -> Self {
+    fn new(reader: R, length: usize) -> Self {
         Self{
-            reader: reader.take(length as u64),
-
+            reader: BitReader::new(reader.take(length as u64)),
         }
     }
 }
@@ -512,6 +520,47 @@ impl <R: Read> Read for Deflate<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         unimplemented!()
     }
+}
+
+/// Generates the canonical Huffman code-value dictionary from the given
+/// code-lengths. All codes are prefixed with a 1-bit to be able to
+/// differentiate them without storing their lengths.
+/// Taken from RFC 1951, 3.2.2.
+fn generate_huffman(lens: &[usize]) -> io::Result<HashMap<u16, u16>> {
+    // Find the max length
+    let max_bits = lens.iter().cloned().max().unwrap_or(0);
+    if max_bits > DEFLATE_MAX_BITS {
+        return Err(io::Error::new(io::ErrorKind::Other, "Invalid code length!"));
+    }
+    // Count the number of codes for each code length.  Let bl_count[N] be the
+    // number of codes of length N, N >= 1.
+    let mut bl_count = [0u16; DEFLATE_MAX_BITS + 1];
+    for l in lens {
+        bl_count[*l] += 1;
+    }
+    // Find the numerical value of the smallest code for each code length.
+    let mut next_code = vec![0u16; DEFLATE_MAX_BITS + 1];
+    let mut code = 0u16;
+    // Not setting to 0 to make the extra padding bit on the left
+    bl_count[0] = 1;
+    for bits in 1..=max_bits {
+        code = (code + bl_count[bits - 1]) << 1;
+        next_code[bits] = code;
+    }
+    // Assign numerical values to all codes, using consecutive values for all
+    // codes of the same length with the base values determined at step 2. Codes
+    // that are never used (which have a bit length of zero) must not be
+    // assigned a value.
+    let mut result = HashMap::new();
+    for n in 0..lens.len() {
+        let len = lens[n];
+        if len != 0 {
+            let code = next_code[len];
+            result.insert(code, n as u16);
+            next_code[len] += 1;
+        }
+    }
+    Ok(result)
 }
 
 /// Decodes an UTF8 String.
@@ -565,13 +614,24 @@ fn decode_cp437(bs: &[u8]) -> String {
     result
 }
 
+fn test_huffman(lens: &[usize]) {
+    let dict = generate_huffman(lens).unwrap();
+    println!("Lengths: {:?}", lens);
+    for (c, v) in &dict {
+        println!("{:b} -> {}", c, v);
+    }
+}
+
 pub fn test(path: impl AsRef<Path>) {
-    let f = fs::File::open(path).unwrap();
+    /*let f = fs::File::open(path).unwrap();
     let mut fr = ByteReader::new(f).expect("msg: &str");
     let entries = parse_central_directory(&mut fr).expect("msg: &str");
     for e in &entries {
         println!("{}", e.file_name);
-    }
+    }*/
+
+    test_huffman(&[1, 0, 3, 2, 3]);
+    test_huffman(&[2, 2, 1, 0, 0, 0]);
 }
 
 #[cfg(test)]
