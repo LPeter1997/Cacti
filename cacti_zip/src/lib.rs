@@ -15,7 +15,7 @@ struct ByteReader<R: Read + Seek> {
 
 impl <R: Read + Seek> ByteReader<R> {
     /// Tries to create a new `ByteReader` from an underlying reader.
-    fn new(reader: R) -> io::Result<Self> {
+    fn new(mut reader: R) -> io::Result<Self> {
         // Calculate stream len
         let current = reader.seek(SeekFrom::Current(0))?;
         let length = reader.seek(SeekFrom::End(0))? as usize;
@@ -24,7 +24,7 @@ impl <R: Read + Seek> ByteReader<R> {
     }
 
     /// Sets the current offset for this reader.
-    fn set_offset(&self, offset: usize) -> io::Result<()> {
+    fn set_offset(&mut self, offset: usize) -> io::Result<()> {
         self.reader.seek(SeekFrom::Start(offset as u64))?;
         self.offset = offset;
         Ok(())
@@ -38,6 +38,30 @@ impl <R: Read + Seek> ByteReader<R> {
 
     /// Returns the remaining length of this reader.
     fn rem_len(&self) -> usize { self.length - self.offset }
+
+    /// Reads in a little-endian 2-byte unsigned integer.
+    fn read_le_u16(&mut self) -> io::Result<u16> {
+        let mut bs: [u8; 2] = Default::default();
+        self.reader.read_exact(&mut bs)?;
+        self.offset += 2;
+        Ok(u16::from_le_bytes(bs))
+    }
+
+    /// Reads in a little-endian 4-byte unsigned integer.
+    fn read_le_u32(&mut self) -> io::Result<u32> {
+        let mut bs: [u8; 4] = Default::default();
+        self.reader.read_exact(&mut bs)?;
+        self.offset += 4;
+        Ok(u32::from_le_bytes(bs))
+    }
+
+    /// Reads in an exact number of bytes into a `Vec`.
+    fn read_to_vec(&mut self, len: usize) -> io::Result<Vec<u8>> {
+        let mut v = vec![0u8; len];
+        self.reader.read_exact(&mut v)?;
+        self.offset += len;
+        Ok(v)
+    }
 }
 
 /// The kinds of signature a zip structure can have.
@@ -56,57 +80,76 @@ trait Parse: Sized {
     /// The type of signature this structure has.
     const SIGNATURE: Signature;
     /// The least number of bytes this structure needs to fit (fixed-size
-    /// bytes).
+    /// bytes), not counting the signature.
     const FIX_LEN: usize;
 
-    // TODO: Finish
+    /// Tries to parse this structure from the given bytes. The position of the
+    /// reader will be reset, if the parse wasn't successful. On success returns
+    /// the parsed structure and the overall consumed bytes.
+    ///
+    /// The user shouldn't implement this, implement `parse_data` instead.
+    fn parse<R: Read + Seek>(r: &mut ByteReader<R>) -> io::Result<(Self, usize)> {
+        let offset = r.offset();
+        let result = Self::parse_noreset(r);
+        if result.is_err() {
+            r.set_offset(offset)?;
+        }
+        result
+    }
 
-    /// Tries to parse this structure from the given bytes. The offset of the
-    /// reader will be reset, if the parse wasn't successful.
-    fn parse(b: &mut (impl Seek + Read)) -> io::Result<(Self, usize)> {
+    /// Tries to parse this structure from the given bytes. The position of the
+    /// reader will be unspecified, if the parse wasn't successful. On success
+    /// returns the parsed structure and the overall consumed bytes.
+    ///
+    /// The user shouldn't implement this, implement `parse_data` instead.
+    fn parse_noreset<R: Read + Seek>(r: &mut ByteReader<R>) -> io::Result<(Self, usize)> {
+        use io::Error;
+        use io::ErrorKind::{UnexpectedEof, InvalidData};
+
+        // Check if fix length is in range
+        if r.rem_len() < Self::FIX_LEN {
+            return Err(Error::new(UnexpectedEof, "Not enough bytes!"));
+        }
+
         match Self::SIGNATURE {
             Signature::None => {
-                // Check if fix length is in range
-                if b.len() < Self::FIX_LEN {
-                    return Err(io::Error::new(io::ErrorKind::UnexpectedEof,
-                        "Not enough bytes!"));
-                }
-                let (result, consumed) = Self::parse_internal(b)?;
+                let (result, consumed) = Self::parse_data(r)?;
                 Ok((result, Self::FIX_LEN + consumed))
             },
             Signature::Required(signature) => {
                 // Check if signarute and fix length are in range
-                if b.len() < Self::FIX_LEN + 4 {
-                    return Err(io::Error::new(io::ErrorKind::UnexpectedEof,
-                        "Not enough bytes!"));
+                if r.rem_len() < Self::FIX_LEN + 4 {
+                    return Err(Error::new(UnexpectedEof, "Not enough bytes!"));
                 }
                 // Check signature
-                let s = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
-                if s != signature {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData,
-                        "Wrong signature!"));
+                if r.read_le_u32()? != signature {
+                    return Err(Error::new(InvalidData, "Wrong signature!"));
                 }
-                let (result, consumed) = Self::parse_internal(&b[4..])?;
+                let (result, consumed) = Self::parse_data(r)?;
                 Ok((result, Self::FIX_LEN + consumed + 4))
             },
             Signature::Optional(signature) => {
                 // Check if signarute and fix length are in range
-                let could_have_signature = b.len() >= Self::FIX_LEN + 4;
-                if b.len() >= Self::FIX_LEN + 4 {
+                if r.rem_len() >= Self::FIX_LEN + 4 {
+                    let offset = r.offset();
                     // Check signature
-                    let s = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
-                    if s == signature {
-                        let (result, consumed) = Self::parse_internal(&b[4..])?;
+                    if r.read_le_u32()? == signature {
+                        let (result, consumed) = Self::parse_data(r)?;
                         return Ok((result, Self::FIX_LEN + consumed + 4));
                     }
+                    // No match, reset
+                    r.set_offset(offset)?;
                 }
-                let (result, consumed) = Self::parse_internal(b)?;
+                let (result, consumed) = Self::parse_data(r)?;
                 Ok((result, Self::FIX_LEN + consumed))
             }
         }
     }
 
-    fn parse_internal(b: &[u8]) -> io::Result<(Self, usize)>;
+    /// Tries to parse this structure from the given bytes. The function does
+    /// not do bound checks for `FIX_LEN` or the signature. On success returns
+    /// the parsed structure and the **non-fix length, extra consumed bytes**.
+    fn parse_data<R: Read + Seek>(r: &mut ByteReader<R>) -> io::Result<(Self, usize)>;
 }
 
 /// The primary structure we locate for an archive.
@@ -127,21 +170,19 @@ impl Parse for EndOfCentralDirectoryRecord {
     const SIGNATURE: Signature = Signature::Required(0x06054b50);
     const FIX_LEN: usize = 18;
 
-    fn parse_internal(b: &[u8]) -> io::Result<(Self, usize)> {
-        // Fix-size
-        let disk_number = u16::from_le_bytes([b[4], b[5]]);
-        let central_dir_start_disk = u16::from_le_bytes([b[6], b[7]]);
-        let entries_on_this_disk = u16::from_le_bytes([b[8], b[9]]);
-        let entries_in_central_dir = u16::from_le_bytes([b[10], b[11]]);
-        let central_dir_size = u32::from_le_bytes([b[12], b[13], b[14], b[15]]);
-        let central_dir_offset = u32::from_le_bytes([b[16], b[17], b[18], b[19]]);
-        let comment_len = u16::from_le_bytes([b[20], b[21]]) as usize;
+    fn parse_data<R: Read + Seek>(r: &mut ByteReader<R>) -> io::Result<(Self, usize)> {
+        let disk_number            = r.read_le_u16()?;
+        let central_dir_start_disk = r.read_le_u16()?;
+        let entries_on_this_disk   = r.read_le_u16()?;
+        let entries_in_central_dir = r.read_le_u16()?;
+        let central_dir_size       = r.read_le_u32()?;
+        let central_dir_offset     = r.read_le_u32()?;
+        let comment_len            = r.read_le_u16()? as usize;
         // Now the variable-sized comment
-        let b = &b[22..];
-        if b.len() < comment_len {
+        if r.rem_len() < comment_len {
             return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Not enough bytes!"));
         }
-        let comment = Vec::from(&b[0..comment_len]);
+        let comment = r.read_to_vec(comment_len)?;
         let result = Self{
             disk_number,
             central_dir_start_disk,
@@ -157,13 +198,14 @@ impl Parse for EndOfCentralDirectoryRecord {
 
 impl EndOfCentralDirectoryRecord {
     /// Tries to find the `EndOfCentralDirectoryRecord`. On success returns it
-    /// with it's starting offset.
-    fn find(b: &[u8]) -> io::Result<(Self, usize)> {
+    /// with it's starting offset. The position of the reader will be at the
+    /// end of the `EndOfCentralDirectoryRecord` structure.
+    fn find<R: Read + Seek>(r: &mut ByteReader<R>) -> io::Result<(Self, usize)> {
         // Go backwards
-        let mut offset = b.len() - Self::FIX_LEN;
+        let mut offset = r.total_len() - Self::FIX_LEN;
         loop {
-            let sub_b = &b[offset..];
-            if let Ok((r, _)) = EndOfCentralDirectoryRecord::parse(sub_b) {
+            r.set_offset(offset)?;
+            if let Ok((r, _)) = EndOfCentralDirectoryRecord::parse_noreset(r) {
                 return Ok((r, offset));
             }
             if offset == 0 {
@@ -175,75 +217,62 @@ impl EndOfCentralDirectoryRecord {
     }
 }
 
-// central directory header ////////////////////////////////////////////////////
-
+/// The entry in the central directory, that represents a file present in the
+/// archive.
+/// Specification 4.3.12.
+#[repr(C)]
 #[derive(Debug)]
 struct FileHeader {
-    version_made         : u16            ,
-    version_needed       : u16            ,
-    flags                : u16            ,
-    compression          : u16            ,
-    mod_time             : u16            ,
-    mod_date             : u16            ,
-    crc32                : u32            ,
-    compressed_size      : usize          ,
-    uncompressed_size    : usize          ,
-    disk_number          : u16            ,
-    internal_file_attribs: u16            ,
-    external_file_attribs: u32            ,
-    local_header_offset  : u32            ,
-    file_name            : String         ,
-    extra                : Vec<ExtraField>,
-    file_comment         : String         ,
+    version_made         : u16                     ,
+    version_needed       : u16                     ,
+    flags                : u16                     ,
+    compression          : u16                     ,
+    mod_time             : u16                     ,
+    mod_date             : u16                     ,
+    crc32                : u32                     ,
+    compressed_size      : usize                   ,
+    uncompressed_size    : usize                   ,
+    disk_number          : u16                     ,
+    internal_file_attribs: u16                     ,
+    external_file_attribs: u32                     ,
+    local_header_offset  : u32                     ,
+    file_name            : String                  ,
+    extra                : Vec<ExtensibleDataField>,
+    file_comment         : String                  ,
 }
 
-impl FileHeader {
-    /// Parses the bytes into a `FileHeader` structure. If succeeded, returns
-    /// the read in structure and the number of bytes read.
-    fn parse(b: &[u8]) -> io::Result<(Self, usize)> {
-        // Make sure to have enough bytes
-        if b.len() < 46 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Not enough bytes!"));
-        }
-        // Signature must be 0x02014b50
-        let signature = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
-        if signature != 0x02014b50 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "Wrong signature!"));
-        }
-        // Read fix size
-        let version_made = u16::from_le_bytes([b[4], b[5]]);
-        let version_needed = u16::from_le_bytes([b[6], b[7]]);
-        let flags = u16::from_le_bytes([b[8], b[9]]);
-        let compression = u16::from_le_bytes([b[10], b[11]]);
-        let mod_time = u16::from_le_bytes([b[12], b[13]]);
-        let mod_date = u16::from_le_bytes([b[14], b[15]]);
-        let crc32 = u32::from_le_bytes([b[16], b[17], b[18], b[19]]);
-        let compressed_size = u32::from_le_bytes([b[20], b[21], b[22], b[23]]) as usize;
-        let uncompressed_size = u32::from_le_bytes([b[24], b[25], b[26], b[27]]) as usize;
-        let file_name_len = u16::from_le_bytes([b[28], b[29]]) as usize;
-        let extra_len = u16::from_le_bytes([b[30], b[31]]) as usize;
-        let file_comment_len = u16::from_le_bytes([b[32], b[33]]) as usize;
-        let disk_number = u16::from_le_bytes([b[34], b[35]]);
-        let internal_file_attribs = u16::from_le_bytes([b[36], b[37]]);
-        let external_file_attribs = u32::from_le_bytes([b[38], b[39], b[40], b[41]]);
-        let local_header_offset = u32::from_le_bytes([b[42], b[43], b[44], b[45]]);
-        // Enough space for variable
-        let b = &b[46..];
-        if b.len() < file_name_len + extra_len + file_comment_len {
+impl Parse for FileHeader {
+    const SIGNATURE: Signature = Signature::Required(0x02014b50);
+    const FIX_LEN: usize = 42;
+
+    fn parse_data<R: Read + Seek>(r: &mut ByteReader<R>) -> io::Result<(Self, usize)> {
+        let version_made          = r.read_le_u16()?;
+        let version_needed        = r.read_le_u16()?;
+        let flags                 = r.read_le_u16()?;
+        let compression           = r.read_le_u16()?;
+        let mod_time              = r.read_le_u16()?;
+        let mod_date              = r.read_le_u16()?;
+        let crc32                 = r.read_le_u32()?;
+        let compressed_size       = r.read_le_u32()? as usize;
+        let uncompressed_size     = r.read_le_u32()? as usize;
+        let file_name_len         = r.read_le_u16()? as usize;
+        let extra_len             = r.read_le_u16()? as usize;
+        let file_comment_len      = r.read_le_u16()? as usize;
+        let disk_number           = r.read_le_u16()?;
+        let internal_file_attribs = r.read_le_u16()?;
+        let external_file_attribs = r.read_le_u32()?;
+        let local_header_offset   = r.read_le_u32()?;
+        // Check for space for variable-length
+        if r.rem_len() < file_name_len + extra_len + file_comment_len {
             return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Not enough bytes!"));
         }
         // Extract
         let is_utf8 = (flags & (1 << 11)) != 0;
         let string_decode = if is_utf8 { decode_utf8 } else { decode_cp437 };
-        let file_name = string_decode(&b[0..file_name_len]);
-        let b = &b[file_name_len..];
-        let extra = &b[0..extra_len];
-        let (extra, _ec) = ExtraField::parse_vec(extra);
-        // assert_eq!(_ec, extra_len);
-        let b = &b[extra_len..];
-        let file_comment = string_decode(&b[0..file_comment_len]);
+        let file_name = string_decode(&r.read_to_vec(file_name_len)?);
+        let (extra, _ec) = ExtensibleDataField::parse_vec(r, extra_len)?;
+        let file_comment = string_decode(&r.read_to_vec(file_comment_len)?);
         // All good
-        let consumed = 46 + file_name_len + extra_len + file_comment_len;
         let result = Self{
             version_made,
             version_needed,
@@ -262,127 +291,125 @@ impl FileHeader {
             extra,
             file_comment,
         };
-        Ok((result, consumed))
+        Ok((result, file_name_len + extra_len + file_comment_len))
     }
+}
 
-    /// Returns true, if the given flag is set.
+impl FileHeader {
+    /// Returns `true`, if the given flag is set.
     fn is_flag(&self, index: usize) -> bool {
         (self.flags & (1 << index)) != 0
     }
 
-    /// Returns true, if this entry is a directory.
+    /// Returns `true`, if this header represents a directory.
     fn is_dir(&self) -> bool {
         let lastc = self.file_name.chars().last();
         lastc == Some('/') || lastc == Some('\\')
     }
 
-    /// Returns true, if this entry is a file.
+    /// Returns `true`, if this header represents a file.
     fn is_file(&self) -> bool {
         !self.is_dir()
     }
 }
 
-// extra field /////////////////////////////////////////////////////////////////
-
+/// Extensible data fields.
+/// Specification 4.5.1.
+#[repr(C)]
 #[derive(Debug)]
-struct ExtraField {
+struct ExtensibleDataField {
     id  : u16    ,
     data: Vec<u8>,
 }
 
-impl ExtraField {
-    /// Parses the bytes into an `ExtraField` structure. If succeeded, returns
-    /// the read in structure and the number of bytes read.
-    fn parse(b: &[u8]) -> io::Result<(Self, usize)> {
-        // Check for at least header bytes
-        if b.len() < 4 {
-            return None;
-        }
-        // Read in fix
-        let id = u16::from_le_bytes([b[0], b[1]]);
-        let data_len = u16::from_le_bytes([b[2], b[3]]) as usize;
-        // Check if enough for variable
-        let b = &b[4..];
-        if b.len() < data_len {
-            return None;
-        }
-        // Read in
-        let data = Vec::from(&b[0..data_len]);
-        // All good
-        let consumed = 4 + data_len;
-        let result = Self{ id, data };
-        Some((result, consumed))
-    }
+impl Parse for ExtensibleDataField {
+    const FIX_LEN: usize = 4;
+    const SIGNATURE: Signature = Signature::None;
 
-    /// Parses a `Vec<ExtraField>` as long as it succeeds. Returns the read in
-    /// structures and the number of bytes read.
-    fn parse_vec(mut b: &[u8]) -> (Vec<Self>, usize) {
+    fn parse_data<R: Read + Seek>(r: &mut ByteReader<R>) -> io::Result<(Self, usize)> {
+        let id       = r.read_le_u16()?;
+        let data_len = r.read_le_u16()? as usize;
+        // Check if enough for variable-sized
+        if r.rem_len() < data_len {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Not enough bytes!"));
+        }
+        // Extract
+        let data = r.read_to_vec(data_len)?;
+        // All good
+        let result = Self{ id, data };
+        Ok((result, data_len))
+    }
+}
+
+impl ExtensibleDataField {
+    /// Parses a `Vec<ExtensibleDataField>` as long as it succeeds and is in
+    /// range. Returns the read in structures and the number of bytes read.
+    /// The function is guaranteed to consume exactly `len` number of bytes on
+    /// success, even if it's not an exact fit for the elements.
+    fn parse_vec<R: Read + Seek>(r: &mut ByteReader<R>, len: usize) -> io::Result<(Vec<Self>, usize)> {
+        let init_offset = r.offset();
         let mut result = Vec::new();
         let mut consumed = 0;
-        while let Some((e, offs)) = Self::parse(b) {
-            result.push(e);
-            consumed += offs;
-            b = &b[offs..];
+        while consumed < len {
+            if let Ok((e, ec)) = Self::parse_noreset(r) {
+                consumed += ec;
+                if consumed > len {
+                    break;
+                }
+                result.push(e);
+            }
+            else {
+                break;
+            }
         }
-        (result, consumed)
+        // Set to exact amount
+        r.set_offset(init_offset + len)?;
+        Ok((result, len))
     }
 }
 
-// local file header ///////////////////////////////////////////////////////////
-
+/// Local replicas of the directory entries above the actual compressed data.
+/// Specification 4.3.7.
+#[repr(C)]
 #[derive(Debug)]
 struct LocalFileHeader {
-    version_needed       : u16            ,
-    flags                : u16            ,
-    compression          : u16            ,
-    mod_time             : u16            ,
-    mod_date             : u16            ,
-    crc32                : u32            ,
-    compressed_size      : usize          ,
-    uncompressed_size    : usize          ,
-    file_name            : String         ,
-    extra                : Vec<ExtraField>,
+    version_needed       : u16                     ,
+    flags                : u16                     ,
+    compression          : u16                     ,
+    mod_time             : u16                     ,
+    mod_date             : u16                     ,
+    crc32                : u32                     ,
+    compressed_size      : usize                   ,
+    uncompressed_size    : usize                   ,
+    file_name            : String                  ,
+    extra                : Vec<ExtensibleDataField>,
 }
 
-impl LocalFileHeader {
-    /// Parses the bytes into a `LocalFileHeader` structure. If succeeded,
-    /// returns the read in structure and the number of bytes read.
-    fn parse(b: &[u8]) -> Option<(Self, usize)> {
-        // Make sure to have enough bytes
-        if b.len() < 30 {
-            return None;
-        }
-        // Signature must be 0x02014b50
-        let signature = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
-        if signature != 0x04034b50 {
-            return None;
-        }
-        // Read fixed size
-        let version_needed = u16::from_le_bytes([b[4], b[5]]);
-        let flags = u16::from_le_bytes([b[6], b[7]]);
-        let compression = u16::from_le_bytes([b[8], b[9]]);
-        let mod_time = u16::from_le_bytes([b[10], b[11]]);
-        let mod_date = u16::from_le_bytes([b[12], b[13]]);
-        let crc32 = u32::from_le_bytes([b[14], b[15], b[16], b[17]]);
-        let compressed_size = u32::from_le_bytes([b[18], b[19], b[20], b[21]]) as usize;
-        let uncompressed_size = u32::from_le_bytes([b[22], b[23], b[24], b[25]]) as usize;
-        let file_name_len = u16::from_le_bytes([b[26], b[27]]) as usize;
-        let extra_len = u16::from_le_bytes([b[28], b[29]]) as usize;
+impl Parse for LocalFileHeader {
+    const FIX_LEN: usize = 26;
+    const SIGNATURE: Signature = Signature::Required(0x04034b50);
+
+    fn parse_data<R: Read + Seek>(r: &mut ByteReader<R>) -> io::Result<(Self, usize)> {
+        let version_needed    = r.read_le_u16()?;
+        let flags             = r.read_le_u16()?;
+        let compression       = r.read_le_u16()?;
+        let mod_time          = r.read_le_u16()?;
+        let mod_date          = r.read_le_u16()?;
+        let crc32             = r.read_le_u32()?;
+        let compressed_size   = r.read_le_u32()? as usize;
+        let uncompressed_size = r.read_le_u32()? as usize;
+        let file_name_len     = r.read_le_u16()? as usize;
+        let extra_len         = r.read_le_u16()? as usize;
         // Check if enough for variable
-        let b = &b[30..];
-        if b.len() < file_name_len + extra_len {
-            return None;
+        if r.rem_len() < file_name_len + extra_len {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Not enough bytes!"));
         }
         // Enough, read
         let is_utf8 = (flags & (1 << 11)) != 0;
-        let file_name = &b[0..file_name_len];
-        let file_name = if is_utf8 { decode_utf8(file_name) } else { decode_cp437(file_name) };
-        let b = &b[file_name_len..];
-        let extra = &b[0..extra_len];
-        let (extra, _ec) = ExtraField::parse_vec(extra);
-        // assert_eq!(_ec, extra_len);
+        let string_decode = if is_utf8 { decode_utf8 } else { decode_cp437 };
+        let file_name = string_decode(&r.read_to_vec(file_name_len)?);
+        let (extra, _ec) = ExtensibleDataField::parse_vec(r, extra_len)?;
         // All good
-        let consumed = 30 + file_name_len + extra_len;
         let result = Self{
             version_needed,
             flags,
@@ -395,256 +422,24 @@ impl LocalFileHeader {
             file_name,
             extra,
         };
-        Some((result, consumed))
+        Ok((result, file_name_len + extra_len))
     }
 }
 
-// Parsing an archive //////////////////////////////////////////////////////////
-
-fn parse_archive(b: &[u8]) {
-    // First find the 'end of central directory record'
-    let end_record = EndOfCentralDirectoryRecord::find(b);
-    if end_record.is_none() {
-        println!("No end record");
-        return;
-    }
-    let (end_record, _) = end_record.unwrap();
-    // TODO: Zip64
-    // let is_zip64 = false;
+/// Parses a Zip archive's central directory into `FileHeader` records.
+fn parse_central_directory<R: Read + Seek>(r: &mut ByteReader<R>) -> io::Result<Vec<FileHeader>> {
+    // First we have to find the end of the central directory
+    let (end_of_directory, _eod_start) = EndOfCentralDirectoryRecord::find(r)?;
+    // TODO: Find out if Zip64
     // Parse central directory entries
-    let mut dir_entries = Vec::new();
-    {
-        let mut offset = end_record.central_dir_offset as usize;
-        for _ in 0..end_record.total_entries_in_central_dir {
-            let header = FileHeader::parse(&b[offset..]);
-            if header.is_none() {
-                println!("Corrupt directory entry");
-                return;
-            }
-            let (header, offs) = header.unwrap();
-            offset += offs;
-            dir_entries.push(header);
-        }
+    let mut entries = Vec::new();
+    r.set_offset(end_of_directory.central_dir_offset as usize)?;
+    for _ in 0..end_of_directory.entries_in_central_dir {
+        let (header, _) = FileHeader::parse_noreset(r)?;
+        entries.push(header);
     }
-
-    // For now we just match local headers
-    for e in &dir_entries {
-        if e.is_flag(0) {
-            // Encrypted
-            unimplemented!();
-        }
-
-        let hoffs = e.local_header_offset as usize;
-        let sub = &b[hoffs..];
-        if let Some((_loc, loc_size)) = LocalFileHeader::parse(sub) {
-            println!("Trying to decompress {}:", e.file_name);
-            let data_offset = hoffs + loc_size;
-            let data_size = e.compressed_size;
-            if data_offset + data_size > b.len() {
-                println!("VERI BIG OOF");
-                break;
-            }
-            let data = &b[data_offset..(data_offset + data_size)];
-            // Deflate
-            if e.compression == 8 {
-                let result = deflate(data);
-                println!("Deflated: {:?}", result);
-            }
-            else {
-                println!("Unknown compression: {}", e.compression);
-            }
-        }
-        else {
-            println!("BIG OOF");
-        }
-    }
+    Ok(entries)
 }
-
-// Deflate /////////////////////////////////////////////////////////////////////
-
-// Bit-stream reader helper ////////////
-
-struct BitReader<'a> {
-    bytes: &'a [u8],
-    position: usize,
-}
-
-impl <'a> BitReader<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self{ bytes, position: 0 }
-    }
-
-    fn read_to_u8(&mut self, count: usize) -> Option<u8> {
-        const BITMASKS: [u8; 9] = [
-            0b00000000, 0b00000001, 0b00000011,
-            0b00000111, 0b00001111, 0b00011111,
-            0b00111111, 0b01111111, 0b11111111,
-        ];
-        let result;
-        let byte = self.position / 8;
-        let bit = self.position % 8;
-        // Bounds-check
-        if byte >= self.bytes.len() {
-            return None;
-        }
-        if bit + count <= 8 {
-            // We fit into this bit
-            result = (self.bytes[byte] >> bit) & BITMASKS[count];
-        }
-        else {
-            // From 2 parts, bounds-check
-            if byte + 1 >= self.bytes.len() {
-                return None;
-            }
-            // Concatenate from 2 bytes
-            let rem = 8 - bit;
-            let next_rem = count - rem;
-            result =   (self.bytes[byte] >> rem)
-                     | ((self.bytes[byte + 1] >> (8 - next_rem)) & BITMASKS[next_rem]);
-        }
-        self.position += count;
-        Some(result)
-    }
-
-    fn align_to_byte(&mut self) {
-        let offs = 8 - self.position % 8;
-        if offs == 8 {
-            return;
-        }
-        self.position += offs;
-    }
-
-    fn read_aligned_u16(&mut self) -> Option<u16> {
-        assert_eq!(self.position % 8, 0);
-        let byte = self.position / 8;
-        // Bounds check
-        if byte + 1 >= self.bytes.len() {
-            return None;
-        }
-        self.position += 16;
-        Some(u16::from_le_bytes([self.bytes[byte], self.bytes[byte + 1]]))
-    }
-
-    fn read_aligned(&mut self, buffer: &mut [u8]) -> bool {
-        assert_eq!(self.position % 8, 0);
-        let byte = self.position / 8;
-        // Bounds check
-        if byte + buffer.len() > self.bytes.len() {
-            return false;
-        }
-        self.position += 8 * buffer.len();
-        buffer.clone_from_slice(&self.bytes[byte..(byte + buffer.len())]);
-        true
-    }
-}
-
-////////////////////////////////////////
-
-fn deflate(bytes: &[u8]) -> Option<Vec<u8>> {
-    let mut output = Vec::new();
-    let mut reader = BitReader::new(bytes);
-    loop {
-        // Block header
-        let is_last = reader.read_to_u8(1);
-        let block_type = reader.read_to_u8(2);
-        if is_last.is_none() || block_type.is_none() {
-            // Error
-            return None;
-        }
-        let is_last = is_last.unwrap() != 0;
-        let block_type = block_type.unwrap();
-
-        if block_type == 0b11 {
-            // Reserved, error
-            println!("Reserved header error");
-            return None;
-        }
-
-        if block_type == 0b00 {
-            reader.align_to_byte();
-            // Read LEN and NLEN
-            let len = reader.read_aligned_u16();
-            let nlen = reader.read_aligned_u16();
-            if len.is_none() || nlen.is_none() {
-                return None;
-            }
-            let len = len.unwrap();
-            let nlen = nlen.unwrap();
-            // Do we need to check this?
-            if !len != nlen {
-                return None;
-            }
-            // Reserve for block
-            let len = len as usize;
-            let output_offs = output.len();
-            output.resize(output_offs + len, 0u8);
-            // Read
-            if !reader.read_aligned(&mut output[output_offs..(output_offs + len)]) {
-                return None;
-            }
-        }
-        else {
-            let mut dict = HashMap::new();
-            let mut min_len = 16;
-            if block_type == 0b10 {
-                // TODO: Read in dynamic Huffman code
-                unimplemented!("Dynamic huffman loading");
-            }
-            else {
-                // Default Huffman
-                for i in 0..=143   { dict.insert((8, 0b00110000  + i), i); };
-                for i in 144..=255 { dict.insert((9, 0b110010000 + i), i); };
-                for i in 256..=279 { dict.insert((7, 0b0000000   + i), i); };
-                for i in 280..=287 { dict.insert((8, 0b11000000  + i), i); };
-                min_len = 7;
-            }
-            // Get the next value decoded
-            // TODO: Probably not u8, since it could get longer
-            // Gotta check
-            let code = reader.read_to_u8(min_len);
-            if code.is_none() {
-                return None;
-            }
-            let mut code =
-            unimplemented!("Huffman");
-        }
-
-        if is_last {
-            break;
-        }
-    }
-    Some(output)
-}
-
-fn generate_huffman_codes(lens: &[usize]) -> Vec<Option<u64>> {
-    // Find the max length
-    let max_bits = lens.iter().cloned().max().unwrap_or(0);
-    // Step 1
-    let mut bl_count = vec![0u64; max_bits + 1];
-    for l in lens {
-        bl_count[*l] += 1;
-    }
-    // Step 2
-    let mut next_code = vec![0u64; max_bits + 1];
-    let mut code = 0u64;
-    for bits in 1..=max_bits {
-        code = (code + bl_count[bits - 1]) << 1;
-        next_code[bits] = code;
-    }
-    // Step 3
-    let mut result = vec![None; lens.len()];
-    for n in 0..lens.len() {
-        let len = lens[n];
-        if len != 0 {
-            let code = next_code[len];
-            result[n] = Some(code);
-            next_code[len] += 1;
-        }
-    }
-    result
-}
-
-////////////////////////////////////////////////////////////////////////////////
 
 /// Decodes an UTF8 String.
 fn decode_utf8(bs: &[u8]) -> String {
@@ -698,32 +493,15 @@ fn decode_cp437(bs: &[u8]) -> String {
 }
 
 pub fn test(path: impl AsRef<Path>) {
-    let mut f = fs::File::open(path).unwrap();
-    let mut buffer = Vec::new();
-    f.read_to_end(&mut buffer).expect("REE");
-
-    parse_archive(&buffer);
+    let f = fs::File::open(path).unwrap();
+    let mut fr = ByteReader::new(f).expect("msg: &str");
+    let entries = parse_central_directory(&mut fr).expect("msg: &str");
+    for e in &entries {
+        println!("{}", e.file_name);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_bit_reader() {
-        let bytes = vec![0b11010111, 0b00100010, 0b11011011];
-        let mut bs = BitReader::new(&bytes);
-
-        bs.align_to_byte();
-
-        assert_eq!(bs.read_to_u8(3), Some(0b111));
-        assert_eq!(bs.read_to_u8(1), Some(0b0));
-        assert_eq!(bs.read_to_u8(1), Some(0b1));
-        assert_eq!(bs.read_to_u8(5), Some(0b01101));
-        assert_eq!(bs.read_to_u8(4), Some(0b0001));
-
-        bs.align_to_byte();
-
-        assert_eq!(bs.read_to_u8(3), Some(0b110));
-    }
 }
