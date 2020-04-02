@@ -441,6 +441,33 @@ fn parse_central_directory<R: Read + Seek>(r: &mut ByteReader<R>) -> io::Result<
     Ok(entries)
 }
 
+/// Represents a zipped archive.
+pub struct ZipArchive<R: Read + Seek> {
+    reader: ByteReader<R>,
+    entries: Vec<FileHeader>,
+}
+
+impl <R: Read + Seek> ZipArchive<R> {
+    /// Tries to parse a `ZipArchive`'s central directory from the given reader.
+    pub fn parse(reader: R) -> io::Result<Self> {
+        let mut reader = ByteReader::new(reader)?;
+        let entries = parse_central_directory(&mut reader)?;
+        Ok(Self{ reader, entries })
+    }
+}
+
+/// A type for implementing the DEFLATE decompression algorithm.
+#[derive(Debug)]
+struct Deflate<R: Read + Seek> {
+    reader: ByteReader<R>,
+}
+
+impl <R: Read + Seek> Read for Deflate<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        unimplemented!()
+    }
+}
+
 /// Decodes an UTF8 String.
 fn decode_utf8(bs: &[u8]) -> String {
     String::from_utf8_lossy(bs).into_owned()
