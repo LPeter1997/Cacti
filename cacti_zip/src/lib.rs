@@ -64,6 +64,40 @@ impl <R: Read + Seek> ByteReader<R> {
     }
 }
 
+/// A bit-wise reader.
+#[derive(Debug)]
+struct BitReader<R: Read> {
+    reader: R,
+    current_byte: u8,
+    bit_index: u8,
+}
+
+impl <R: Read> BitReader<R> {
+    /// Creates a new `BitReader` from the given reader.
+    fn new(reader: R) -> Self {
+        Self{
+            reader,
+            current_byte: 0,
+            bit_index: 0,
+        }
+    }
+
+    /// Reads the next bit from the stream. Either 1 or 0.
+    fn read_bit(&mut self) -> io::Result<u8> {
+        if self.bit_index == 0 {
+            // Read next byte
+            self.bit_index = 0;
+            let mut bs: [u8; 1] = [0];
+            self.reader.read_exact(&mut bs)?;
+            self.current_byte = bs[0];
+        }
+        // Get bit
+        let bit = (self.current_byte >> self.bit_index) & 0b1;
+        self.bit_index = (self.bit_index + 1) % 8;
+        Ok(bit)
+    }
+}
+
 /// The kinds of signature a zip structure can have.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Signature {
@@ -458,11 +492,23 @@ impl <R: Read + Seek> ZipArchive<R> {
 
 /// A type for implementing the DEFLATE decompression algorithm.
 #[derive(Debug)]
-struct Deflate<R: Read + Seek> {
-    reader: ByteReader<R>,
+struct Deflate<R: Read> {
+    reader: io::Take<R>,
+    dict: HashMap<u16, u8>,
 }
 
-impl <R: Read + Seek> Read for Deflate<R> {
+impl <R: Read> Deflate<R> {
+    /// Creates a new `Deflate` structure from the given reader reference and
+    /// length limit.
+    fn new(reader: &mut R, length: usize) -> Self {
+        Self{
+            reader: reader.take(length as u64),
+
+        }
+    }
+}
+
+impl <R: Read> Read for Deflate<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         unimplemented!()
     }
