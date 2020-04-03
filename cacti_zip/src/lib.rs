@@ -155,6 +155,55 @@ impl <R: Read> BitReader<R> {
     }
 }
 
+/// A fixed-size sliding window implementation.
+#[derive(Debug)]
+struct SlidingWindow {
+    buffer: Box<[u8]>,
+    filled: usize,
+    offset: usize,
+}
+
+impl SlidingWindow {
+    /// Creates a new `SlidingWindow` with the given size.
+    fn new(size: usize) -> Self {
+        Self{
+            buffer: vec![0u8; size].into_boxed_slice(),
+            filled: 0,
+            offset: 0,
+        }
+    }
+
+    /// Adds an element to the buffer.
+    fn push(&mut self, element: u8) {
+        if self.filled < self.buffer.len() {
+            // It just fits
+            self.buffer[self.filled] = element;
+            self.filled += 1;
+        }
+        else {
+            // Slide
+            self.buffer[self.offset] = element;
+            self.offset = (self.offset + 1) % self.buffer.len();
+        }
+    }
+
+    /// Accesses a sub-slice of this `SlidingWindow`. The results are returned
+    /// in 2 slices, since there's a possibility the 2 ends are not contignuous
+    /// anymore.
+    fn slice(&self, start: usize, len: usize) -> (&[u8], &[u8]) {
+        let buf_start = (self.offset + start) % self.buffer.len();
+        let buf_end = (buf_start + len) % self.buffer.len();
+        if buf_end <= buf_start {
+            // 2 pieces
+            (&self.buffer[buf_start..], &self.buffer[..buf_end])
+        }
+        else {
+            // 1 piece, second is empty
+            (&self.buffer[buf_start..buf_end], &self.buffer[0..0])
+        }
+    }
+}
+
 /// The kinds of signature a zip structure can have.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Signature {
@@ -551,12 +600,17 @@ impl <R: Read + Seek> ZipArchive<R> {
 const DEFLATE_MAX_BITS: usize = 15;
 
 /// Inormation about the currently decompressed block for DEFLATE.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 enum DeflateBlock {
     Uncompressed{
         size: usize,
         offset: usize,
     },
+    Huffman{
+        lit_len: HashMap<u16, u16>,
+        dist: Option<HashMap<u16, u16>>,
+        window: SlidingWindow,
+    }
 }
 
 /// A type for implementing the DEFLATE decompression algorithm.
@@ -582,7 +636,7 @@ impl <R: Read> Deflate<R> {
 impl <R: Read> Read for Deflate<R> {
     fn read(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
         let mut filled = 0;
-        loop {
+        'outer: loop {
             // Check if we have filled the buffer to the max
             if buf.is_empty() {
                 return Ok(filled);
@@ -629,9 +683,9 @@ impl <R: Read> Read for Deflate<R> {
                     code_len_code_lens[18] = self.reader.read_bits_to_u8(3)? as usize;
                     code_len_code_lens[00] = self.reader.read_bits_to_u8(3)? as usize;
                     // Found a dank formula
-                    for i in 0..(hclen - 4) {
+                    for i in 0..(hclen as isize - 4) {
                         let n = 8 + (i + 1) / 2 * (1 - i % 2 * 2);
-                        code_len_code_lens[n] = self.reader.read_bits_to_u8(3)? as usize;
+                        code_len_code_lens[n as usize] = self.reader.read_bits_to_u8(3)? as usize;
                     }
                     // Code length codes
                     let code_len_code = generate_huffman(&code_len_code_lens)?;
@@ -676,9 +730,39 @@ impl <R: Read> Read for Deflate<R> {
                         for _ in 0..repeat_len { code_lens.push(repeat_val); }
                     }
                     // Get the literal and length codes
-                    let lit_code = generate_huffman(&code_lens[0..hlit]);
+                    let lit_code = generate_huffman(&code_lens[0..hlit])?;
                     // Now distance codes
-                    unimplemented!()
+                    let dist_code_len = &code_lens[hlit..];
+                    let mut dist_code = None;
+                    if dist_code_len.len() == 1 && dist_code_len[0] == 0 {
+                        // No distance-codes are used, all literals
+                    }
+                    else {
+                        // Now we need to fill our Huffman-tree
+                        let mut once = 0;
+                        let mut multiple = 0;
+                        for i in dist_code_len {
+                            if *i == 1 {
+                                once += 1;
+                            }
+                            else if *i > 1 {
+                                multiple += 1;
+                            }
+                        }
+                        if once == 1 && multiple == 0 {
+                            // A single code-length of one, with one unused code
+                            unimplemented!();
+                        }
+                        dist_code = Some(generate_huffman(dist_code_len)?);
+                    }
+                    // Assign as current state
+                    // NOTE: For optimization we could pre-allocate this buffer
+                    // so all Huffman block can share it
+                    self.current_block = Some(DeflateBlock::Huffman{
+                        lit_len: lit_code,
+                        dist: dist_code,
+                        window: SlidingWindow::new(32768),
+                    });
                 }
                 else {
                     unimplemented!("ILLEGAL BLOCK");
@@ -693,7 +777,7 @@ impl <R: Read> Read for Deflate<R> {
                     if *size <= *offset {
                         // Enough, clear state, go to next block
                         self.current_block = None;
-                        continue;
+                        continue 'outer;
                     }
                     // How much we can read
                     let block_rem = *size - *offset;
@@ -704,6 +788,30 @@ impl <R: Read> Read for Deflate<R> {
                     // Keep track
                     filled += can_read;
                     buf = &mut buf[can_read..];
+                },
+                DeflateBlock::Huffman{ lit_len, dist, window } => {
+                    loop {
+                        if buf.is_empty() {
+                            continue 'outer;
+                        }
+                        // We can still fill
+                        let sym = self.reader.decode(DEFLATE_MAX_BITS, lit_len)?;
+                        println!("Symbol: {}", sym);
+                        if sym == 256 {
+                            // End of block
+                            self.current_block = None;
+                            continue 'outer;
+                        }
+                        if sym < 256 {
+                            // Raw literal
+                            filled += 1;
+                            buf[0] = sym as u8;
+                            buf = &mut buf[1..];
+                        }
+                        else {
+                            unimplemented!("Backref!");
+                        }
+                    }
                 },
                 _ => unimplemented!("Unhandled state"),
             }
