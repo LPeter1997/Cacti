@@ -100,6 +100,19 @@ impl <R: Read> BitReader<R> {
         Ok(bit)
     }
 
+    /// Reads in multiple bits into an `u8`.
+    fn read_bits_to_u8(&mut self, count: usize) -> io::Result<u8> {
+        if count > 8 {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput,
+                "Can't read > 8 bits into an u8!"));
+        }
+        let mut result = 0u8;
+        for _ in 0..count {
+            result = (result << 1) | self.read_bit()?;
+        }
+        Ok(result)
+    }
+
     /// Skips to the start of next byte. If already on a byte-boundlary, this is
     /// a no-op.
     fn skip_to_byte(&mut self) {
@@ -125,6 +138,20 @@ impl <R: Read> BitReader<R> {
         }
         self.reader.read_exact(buffer)?;
         Ok(())
+    }
+
+    /// Reads in at most a maximum no. bits, trying to find a code in a given
+    /// dictionary.
+    fn decode(&mut self, max_bits: usize, dict: &HashMap<u16, u16>) -> io::Result<u16> {
+        // Initial 1 because we pad codes
+        let mut code = 1u16;
+        for _ in 0..max_bits {
+            code = (code << 1) | (self.read_bit()? as u16);
+            if let Some(sym) = dict.get(&code) {
+                return Ok(*sym);
+            }
+        }
+        Err(io::Error::new(io::ErrorKind::InvalidData, "Unknown symbol code!"))
     }
 }
 
@@ -590,7 +617,68 @@ impl <R: Read> Read for Deflate<R> {
                     unimplemented!("Fixed Huffman block");
                 }
                 else if btype == 0b10 {
-                    unimplemented!("Dynamic Huffman block");
+                    // 3.2.7
+                    // Read in the metadata
+                    let hlit = self.reader.read_bits_to_u8(5)? as usize + 257;
+                    let hdist = self.reader.read_bits_to_u8(5)? as usize + 1;
+                    let hclen = self.reader.read_bits_to_u8(4)? as usize + 4;
+                    // Read the code length of code lengths
+                    let mut code_len_code_lens = [0usize; 19];
+                    code_len_code_lens[16] = self.reader.read_bits_to_u8(3)? as usize;
+                    code_len_code_lens[17] = self.reader.read_bits_to_u8(3)? as usize;
+                    code_len_code_lens[18] = self.reader.read_bits_to_u8(3)? as usize;
+                    code_len_code_lens[00] = self.reader.read_bits_to_u8(3)? as usize;
+                    // Found a dank formula
+                    for i in 0..(hclen - 4) {
+                        let n = 8 + (i + 1) / 2 * (1 - i % 2 * 2);
+                        code_len_code_lens[n] = self.reader.read_bits_to_u8(3)? as usize;
+                    }
+                    // Code length codes
+                    let code_len_code = generate_huffman(&code_len_code_lens)?;
+                    // Decode code lengths
+                    let mut code_lens = Vec::with_capacity(hlit + hdist);
+                    for _ in 0..(hlit + hdist) {
+                        let sym = self.reader.decode(DEFLATE_MAX_BITS, &code_len_code)?;
+                        if sym < 16 {
+                            // Literal
+                            code_lens.push(sym as usize);
+                            continue;
+                        }
+                        // Some kind of repetition
+                        let mut repeat_val = 0;
+                        let repeat_len;
+                        match sym {
+                            16 => {
+                                if code_lens.is_empty() {
+                                    return Err(io::Error::new(io::ErrorKind::InvalidData,
+                                        "Repetition symbol at first place!"));
+                                }
+                                repeat_val = *code_lens.last().unwrap();
+                                repeat_len = self.reader.read_bits_to_u8(2)? as usize + 3;
+                            },
+                            17 => {
+                                repeat_len = self.reader.read_bits_to_u8(3)? as usize + 3;
+                            },
+                            18 => {
+                                repeat_len = self.reader.read_bits_to_u8(7)? as usize + 11;
+                            },
+                            _ => {
+                                return Err(io::Error::new(io::ErrorKind::InvalidData,
+                                    "Symbol out of range!"));
+                            }
+                        }
+                        // Bounds check
+                        if code_lens.len() + repeat_len > hlit + hdist {
+                            return Err(io::Error::new(io::ErrorKind::InvalidData,
+                                "Symbol repetition out of range!"));
+                        }
+                        // Add repeated
+                        for _ in 0..repeat_len { code_lens.push(repeat_val); }
+                    }
+                    // Get the literal and length codes
+                    let lit_code = generate_huffman(&code_lens[0..hlit]);
+
+                    unimplemented!()
                 }
                 else {
                     unimplemented!("ILLEGAL BLOCK");
