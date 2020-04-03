@@ -5,6 +5,88 @@ use std::collections::HashMap;
 use std::fs;
 use std::io;
 
+// ////////////////////////////////////////////////////////////////////////// //
+// Useful in general, could be it's own library.                              //
+// ////////////////////////////////////////////////////////////////////////// //
+
+/// A bitwise reader for streams that require non-byte aligned reads.
+#[derive(Debug)]
+struct BitReader<R: Read> {
+    reader: R,
+    current_byte: u8,
+    bit_index: u8,
+}
+
+impl <R: Read> BitReader<R> {
+    /// Creates a new `BitReader` from the given underlying reader.
+    fn new(reader: R) -> Self {
+        Self{
+            reader,
+            current_byte: 0,
+            bit_index: 8,
+        }
+    }
+
+    /// Reads the next bit from the stream. Either 1 or 0.
+    fn read_bit(&mut self) -> io::Result<u8> {
+        if self.bit_index == 8 {
+            // Read next byte
+            self.bit_index = 0;
+            let mut bs: [u8; 1] = [0];
+            self.reader.read_exact(&mut bs)?;
+            self.current_byte = bs[0];
+        }
+        // Get bit
+        let bit = (self.current_byte >> self.bit_index) & 0b1;
+        self.bit_index += 1;
+        Ok(bit)
+    }
+
+    /// Reads in multiple bits into an `u8`.
+    fn read_to_u8(&mut self, count: usize) -> io::Result<u8> {
+        if count > 8 {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput,
+                "Can't read > 8 bits into an u8!"));
+        }
+        let mut result = 0u8;
+        for i in 0..count {
+            result |= self.read_bit()? << i;
+        }
+        Ok(result)
+    }
+
+    /// Skips to the start of next byte. If already on a byte-boundlary, this is
+    /// a no-op.
+    fn skip_to_byte(&mut self) {
+        self.bit_index = 8;
+    }
+
+    /// Reads in an aligned `u8`, skipping the remaining of the current byte.
+    fn read_aligned_u8(&mut self) -> io::Result<u8> {
+        let mut b: [u8; 1] = [0];
+        self.read_aligned_to_buffer(&mut b);
+        Ok(b[0])
+    }
+
+    /// Reads in the exact amount of aligned bytes into the given buffer,
+    /// skipping the remaining of the current byte.
+    fn read_aligned_to_buffer(&mut self, buffer: &mut [u8]) -> io::Result<()> {
+        self.skip_to_byte();
+        self.reader.read_exact(buffer)?;
+        Ok(())
+    }
+}
+
+// ////////////////////////////////////////////////////////////////////////// //
+// Specific to DEFLATE.                                                       //
+// ////////////////////////////////////////////////////////////////////////// //
+
+// TODO
+
+// ////////////////////////////////////////////////////////////////////////// //
+// Specific to ZIP.                                                           //
+// ////////////////////////////////////////////////////////////////////////// //
+
 /// The internal reader.
 #[derive(Debug)]
 struct ByteReader<R: Read + Seek> {
@@ -64,94 +146,6 @@ impl <R: Read + Seek> ByteReader<R> {
         self.reader.read_exact(&mut v)?;
         self.offset += len;
         Ok(v)
-    }
-}
-
-/// A bit-wise reader.
-#[derive(Debug)]
-struct BitReader<R: Read> {
-    reader: R,
-    current_byte: u8,
-    bit_index: u8,
-}
-
-impl <R: Read> BitReader<R> {
-    /// Creates a new `BitReader` from the given reader.
-    fn new(reader: R) -> Self {
-        Self{
-            reader,
-            current_byte: 0,
-            bit_index: 0,
-        }
-    }
-
-    /// Reads the next bit from the stream. Either 1 or 0.
-    fn read_bit(&mut self) -> io::Result<u8> {
-        if self.bit_index == 0 {
-            // Read next byte
-            self.bit_index = 0;
-            let mut bs: [u8; 1] = [0];
-            self.reader.read_exact(&mut bs)?;
-            self.current_byte = bs[0];
-        }
-        // Get bit
-        let bit = (self.current_byte >> self.bit_index) & 0b1;
-        self.bit_index = (self.bit_index + 1) % 8;
-        Ok(bit)
-    }
-
-    /// Reads in multiple bits into an `u8`.
-    fn read_bits_to_u8(&mut self, count: usize) -> io::Result<u8> {
-        if count > 8 {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput,
-                "Can't read > 8 bits into an u8!"));
-        }
-        let mut result = 0u8;
-        for _ in 0..count {
-            result = (result << 1) | self.read_bit()?;
-        }
-        Ok(result)
-    }
-
-    /// Skips to the start of next byte. If already on a byte-boundlary, this is
-    /// a no-op.
-    fn skip_to_byte(&mut self) {
-        self.bit_index = 0;
-    }
-
-    /// Reads in an aligned little-endian `u16`. The reader returns an error, if
-    /// it's unaligned.
-    fn read_aligned_le_u16(&mut self) -> io::Result<u16> {
-        if self.bit_index != 0 {
-            return Err(io::Error::new(io::ErrorKind::Other, "Reader is not byte-aligned!"));
-        }
-        let mut bs: [u8; 2] = [0, 0];
-        self.reader.read_exact(&mut bs)?;
-        Ok(u16::from_le_bytes(bs))
-    }
-
-    /// Reads in the exact amount of bytes into the given buffer. The reader
-    /// returns an error, if it's unaligned.
-    fn read_to_buffer(&mut self, buffer: &mut [u8]) -> io::Result<()> {
-        if self.bit_index != 0 {
-            return Err(io::Error::new(io::ErrorKind::Other, "Reader is not byte-aligned!"));
-        }
-        self.reader.read_exact(buffer)?;
-        Ok(())
-    }
-
-    /// Reads in at most a maximum no. bits, trying to find a code in a given
-    /// dictionary.
-    fn decode(&mut self, max_bits: usize, dict: &HashMap<u16, u16>) -> io::Result<u16> {
-        // Initial 1 because we pad codes
-        let mut code = 1u16;
-        for _ in 0..max_bits {
-            code = (code << 1) | (self.read_bit()? as u16);
-            if let Some(sym) = dict.get(&code) {
-                return Ok(*sym);
-            }
-        }
-        Err(io::Error::new(io::ErrorKind::InvalidData, "Unknown symbol code!"))
     }
 }
 
@@ -635,7 +629,7 @@ impl <R: Read> Deflate<R> {
 
 impl <R: Read> Read for Deflate<R> {
     fn read(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
-        let mut filled = 0;
+        /*let mut filled = 0;
         'outer: loop {
             // Check if we have filled the buffer to the max
             if buf.is_empty() {
@@ -815,7 +809,8 @@ impl <R: Read> Read for Deflate<R> {
                 },
                 _ => unimplemented!("Unhandled state"),
             }
-        }
+        }*/
+        Ok(0)
     }
 }
 
@@ -946,4 +941,22 @@ pub fn test(path: impl AsRef<Path>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_bit_reader() -> io::Result<()> {
+        let bytes = [0b10110101, 0b01110110, 0b00101011, 0b11000101];
+        let bytes: &[u8] = &bytes;
+        let mut r = BitReader::new(bytes);
+        r.skip_to_byte(); // Must be no-op
+        assert_eq!(r.read_bit()?, 1);
+        assert_eq!(r.read_bit()?, 0);
+        assert_eq!(r.read_to_u8(4)?, 0b1101);
+        assert_eq!(r.read_to_u8(5)?, 0b11010);
+        assert_eq!(r.read_to_u8(4)?, 0b1110);
+        r.skip_to_byte();  // Must be no-op
+        assert_eq!(r.read_to_u8(3)?, 0b011);
+        r.skip_to_byte();
+        assert_eq!(r.read_to_u8(4)?, 0b0101);
+        Ok(())
+    }
 }
