@@ -23,6 +23,9 @@ impl <R: Read + Seek> ByteReader<R> {
         Ok(Self{ reader, length, offset: 0 })
     }
 
+    /// Returns a reference to the underlying reader.
+    fn reader_ref(&mut self) -> &mut R { &mut self.reader }
+
     /// Sets the current offset for this reader.
     fn set_offset(&mut self, offset: usize) -> io::Result<()> {
         self.reader.seek(SeekFrom::Start(offset as u64))?;
@@ -101,6 +104,27 @@ impl <R: Read> BitReader<R> {
     /// a no-op.
     fn skip_to_byte(&mut self) {
         self.bit_index = 0;
+    }
+
+    /// Reads in an aligned little-endian `u16`. The reader returns an error, if
+    /// it's unaligned.
+    fn read_aligned_le_u16(&mut self) -> io::Result<u16> {
+        if self.bit_index != 0 {
+            return Err(io::Error::new(io::ErrorKind::Other, "Reader is not byte-aligned!"));
+        }
+        let mut bs: [u8; 2] = [0, 0];
+        self.reader.read_exact(&mut bs)?;
+        Ok(u16::from_le_bytes(bs))
+    }
+
+    /// Reads in the exact amount of bytes into the given buffer. The reader
+    /// returns an error, if it's unaligned.
+    fn read_to_buffer(&mut self, buffer: &mut [u8]) -> io::Result<()> {
+        if self.bit_index != 0 {
+            return Err(io::Error::new(io::ErrorKind::Other, "Reader is not byte-aligned!"));
+        }
+        self.reader.read_exact(buffer)?;
+        Ok(())
     }
 }
 
@@ -499,11 +523,21 @@ impl <R: Read + Seek> ZipArchive<R> {
 /// The maximum code-length in bits allowed by DEFLATE.
 const DEFLATE_MAX_BITS: usize = 15;
 
+/// Inormation about the currently decompressed block for DEFLATE.
+#[derive(Debug, PartialEq, Eq)]
+enum DeflateBlock {
+    Uncompressed{
+        size: usize,
+        offset: usize,
+    },
+}
+
 /// A type for implementing the DEFLATE decompression algorithm.
 #[derive(Debug)]
 struct Deflate<R: Read> {
     reader: BitReader<io::Take<R>>,
-    //dict: HashMap<u16, u8>,
+    is_last_block: bool,
+    current_block: Option<DeflateBlock>,
 }
 
 impl <R: Read> Deflate<R> {
@@ -512,13 +546,82 @@ impl <R: Read> Deflate<R> {
     fn new(reader: R, length: usize) -> Self {
         Self{
             reader: BitReader::new(reader.take(length as u64)),
+            is_last_block: false,
+            current_block: None,
         }
     }
 }
 
 impl <R: Read> Read for Deflate<R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        unimplemented!()
+    fn read(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
+        let mut filled = 0;
+        loop {
+            // Check if we have filled the buffer to the max
+            if buf.is_empty() {
+                return Ok(filled);
+            }
+            // Check if we don't have a block started
+            if self.current_block.is_none() {
+                // No block started, but if we were on the last block before,
+                // we can't read more
+                if self.is_last_block {
+                    return Ok(filled);
+                }
+                // We can read in a block header
+                self.is_last_block = self.reader.read_bit()? != 0;
+                let btype = (self.reader.read_bit()? << 1)
+                           | self.reader.read_bit()?;
+                if btype == 0b00 {
+                    // Uncompressed block, let's read LEN and NLEN
+                    self.reader.skip_to_byte();
+                    let len = self.reader.read_aligned_le_u16()?;
+                    let nlen = self.reader.read_aligned_le_u16()?;
+                    if len != !nlen {
+                        return Err(io::Error::new(io::ErrorKind::InvalidData,
+                            "LEN != ~NLEN!"));
+                    }
+                    // Assign as current state
+                    self.current_block = Some(DeflateBlock::Uncompressed{
+                        size: len as usize,
+                        offset: 0,
+                    });
+                }
+                else if btype == 0b01 {
+                    unimplemented!("Fixed Huffman block");
+                }
+                else if btype == 0b10 {
+                    unimplemented!("Dynamic Huffman block");
+                }
+                else {
+                    unimplemented!("ILLEGAL BLOCK");
+                }
+            }
+            // We must have a block here
+            assert!(self.current_block.is_some());
+            let current_block = self.current_block.as_ref().unwrap();
+            match current_block {
+                DeflateBlock::Uncompressed{ size, offset } => {
+                    // Check if we have read enough
+                    if *size <= *offset {
+                        // Enough, clear state, go to next block
+                        self.current_block = None;
+                        continue;
+                    }
+                    // How much we can read
+                    let block_rem = *size - *offset;
+                    let can_read = std::cmp::min(buf.len(), block_rem);
+                    // Read into the sub-buffer
+                    let sub_buf = &mut buf[0..can_read];
+                    println!("Want to read {}", can_read);
+                    self.reader.read_to_buffer(sub_buf)?;
+                    println!("Read!");
+                    // Keep track
+                    filled += can_read;
+                    buf = &mut buf[can_read..];
+                },
+                _ => unimplemented!("Unhandled state"),
+            }
+        }
     }
 }
 
@@ -530,7 +633,7 @@ fn generate_huffman(lens: &[usize]) -> io::Result<HashMap<u16, u16>> {
     // Find the max length
     let max_bits = lens.iter().cloned().max().unwrap_or(0);
     if max_bits > DEFLATE_MAX_BITS {
-        return Err(io::Error::new(io::ErrorKind::Other, "Invalid code length!"));
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid code length!"));
     }
     // Count the number of codes for each code length.  Let bl_count[N] be the
     // number of codes of length N, N >= 1.
@@ -623,15 +726,27 @@ fn test_huffman(lens: &[usize]) {
 }
 
 pub fn test(path: impl AsRef<Path>) {
-    /*let f = fs::File::open(path).unwrap();
+    let f = fs::File::open(path).unwrap();
     let mut fr = ByteReader::new(f).expect("msg: &str");
     let entries = parse_central_directory(&mut fr).expect("msg: &str");
-    for e in &entries {
-        println!("{}", e.file_name);
-    }*/
 
-    test_huffman(&[1, 0, 3, 2, 3]);
-    test_huffman(&[2, 2, 1, 0, 0, 0]);
+    // Let's pick index 3 for now
+    let e = &entries[3];
+    println!("{}", e.file_name);
+    assert!(!e.is_flag(0)); // Must not be encrypted
+
+    // Jump to the local header
+    println!("Offset: {}", e.local_header_offset);
+    fr.set_offset(e.local_header_offset as usize).expect("msg: &str");
+    // Read local header
+    let (local_header, _) = LocalFileHeader::parse(&mut fr).expect("msg: &str");
+    println!("Name in local header: {}", local_header.file_name);
+
+    // Now we are at the local data
+    let mut deflate = Deflate::new(fr.reader_ref(), e.compressed_size);
+    let mut bytes = Vec::new();
+    let read = deflate.read_to_end(&mut bytes).expect("msg: &str");
+    println!("Read in {}", read);
 }
 
 #[cfg(test)]
