@@ -677,7 +677,7 @@ impl <R: Read> Read for Deflate<R> {
                     }
                     // Get the literal and length codes
                     let lit_code = generate_huffman(&code_lens[0..hlit]);
-
+                    // Now distance codes
                     unimplemented!()
                 }
                 else {
@@ -700,9 +700,7 @@ impl <R: Read> Read for Deflate<R> {
                     let can_read = std::cmp::min(buf.len(), block_rem);
                     // Read into the sub-buffer
                     let sub_buf = &mut buf[0..can_read];
-                    println!("Want to read {}", can_read);
                     self.reader.read_to_buffer(sub_buf)?;
-                    println!("Read!");
                     // Keep track
                     filled += can_read;
                     buf = &mut buf[can_read..];
