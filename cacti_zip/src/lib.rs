@@ -2,8 +2,6 @@
 use std::path::Path;
 use std::io::{Read, Seek, SeekFrom};
 use std::collections::HashMap;
-use std::mem::MaybeUninit;
-use std::mem;
 use std::fs;
 use std::io;
 
@@ -89,97 +87,49 @@ impl <R: Read> BitReader<R> {
 /// A fixed-size sliding window implementation using a circular buffer.
 #[derive(Debug)]
 struct SlidingWindow<T> {
-    buffer: Box<[MaybeUninit<T>]>,
-    filled: usize,
-    offset: usize,
+    buffer: Vec<T>,
+    cursor: usize,
 }
 
 impl <T> SlidingWindow<T> {
     /// Creates a new `SlidingWindow` with the given fixed capacity.
-    fn with_capacity(size: usize) -> Self {
-        let mut buffer = Vec::with_capacity(size);
-        unsafe { buffer.set_len(size); }
+    fn with_capacity(capacity: usize) -> Self {
         Self{
-            buffer: buffer.into_boxed_slice(),
-            filled: 0,
-            offset: 0,
+            buffer: Vec::with_capacity(capacity),
+            cursor: 0,
         }
     }
 
     /// Returns the number of elements pushed into the `SlidingWindow`.
-    fn len(&self) -> usize { self.filled }
+    fn len(&self) -> usize { self.buffer.len() }
 
     /// Returns the number of elements that the `SlidingWindow` is capable of
     /// holding.
-    fn capacity(&self) -> usize { self.buffer.len() }
-
-    /// An internal getter for assuming that part of the buffer is initialized.
-    fn assume_buffer(&self, r: std::ops::Range<usize>) -> &[T] {
-        let s = &self.buffer[r];
-        unsafe { std::slice::from_raw_parts(s.as_ptr().cast(), s.len()) }
-    }
-
-    /// Internal function to drop parts of the buffer.
-    fn drop_buffer(&mut self, r: std::ops::Range<usize>) {
-        for e in &mut self.buffer[r] {
-            let elem = mem::replace(e, MaybeUninit::uninit());
-            unsafe { elem.assume_init(); } // Drops
-        }
-    }
+    fn capacity(&self) -> usize { self.buffer.capacity() }
 
     /// Adds an element to the `SlidingWindow`.
     fn push(&mut self, element: T) {
-        if self.filled < self.buffer.len() {
+        if self.buffer.len() < self.buffer.capacity() {
             // It just fits into an empty slot
-            unsafe { *self.buffer[self.filled].as_mut_ptr() = element; }
-            self.filled += 1;
+            self.buffer.push(element);
         }
         else {
             // We are overwriting an element
-            let ptr = self.buffer[self.offset].as_mut_ptr();
-            // Drop the old element, put in the new one
-            mem::replace(unsafe { &mut *ptr }, element);
-            // Slide
-            self.offset = (self.offset + 1) % self.buffer.len();
+            self.buffer[self.cursor] = element;
         }
+        // Slide
+        self.cursor = (self.cursor + 1) % self.buffer.capacity();
     }
 
     /// Clears this `SlidingWindow`, removing all elements.
     fn clear(&mut self) {
-        self.drop_buffer(0..self.filled);
-        self.filled = 0;
-        self.offset = 0;
+        self.buffer.clear();
+        self.cursor = 0;
     }
 
-    // TODO: Should be ops::Index.
-    fn at(&self, index: usize) -> &T {
-        assert!(index <= self.filled, "Index out of range!");
-        let real_idx = (self.offset + index) % self.buffer.len();
-        unsafe { &*self.buffer[real_idx].as_ptr().cast() }
-    }
-
-    /// Accesses a sub-slice of this `SlidingWindow`. The results are returned
-    /// in 2 slices, since there's a possibility the 2 ends are not contignuous
-    /// anymore.
-    fn slice(&self, start: usize, len: usize) -> (&[T], &[T]) {
-        assert!(start + len <= self.filled, "Index out of range!");
-
-        let buf_start = (self.offset + start) % self.buffer.len();
-        let buf_end = (buf_start + len) % self.buffer.len();
-        if buf_end <= buf_start {
-            // 2 pieces
-            (self.assume_buffer(buf_start..self.buffer.len()), self.assume_buffer(0..buf_end))
-        }
-        else {
-            // 1 piece, second is empty
-            (self.assume_buffer(buf_start..buf_end), self.assume_buffer(0..0))
-        }
-    }
-}
-
-impl <T> Drop for SlidingWindow<T> {
-    fn drop(&mut self) {
-        self.drop_buffer(0..self.filled);
+    // TODO: This is bad
+    fn at(&self, i: isize) -> &T {
+        &self.buffer[(self.cursor as isize + i) as usize]
     }
 }
 
@@ -190,17 +140,26 @@ impl <T> Drop for SlidingWindow<T> {
 /// The maximum code-length in bits allowed by DEFLATE.
 const DEFLATE_MAX_BITS: usize = 15;
 
-/// Information about the currently decompressed block for DEFLATE.
+/// State for an uncompressed DEFLATE block.
+#[derive(Debug)]
+struct NonCompressed {
+    size: usize,
+    offset: usize,
+}
+
+/// State for a Huffman-encoded DEFLATE block.
+#[derive(Debug)]
+struct Huffman {
+    lit_len: HashMap<u16, u16>,
+    dist: HashMap<u16, u16>,
+    backref: Option<(usize, isize)>,
+}
+
+/// State for the currently decompressed block for DEFLATE.
 #[derive(Debug)]
 enum DeflateBlock {
-    NonCompressed{
-        size: usize,
-        offset: usize,
-    },
-    Huffman{
-        lit_len: HashMap<u16, u16>,
-        dist: HashMap<u16, u16>,
-    },
+    NonCompressed(NonCompressed),
+    Huffman(Huffman),
 }
 
 /// A type for implementing the DEFLATE decompression algorithm.
@@ -261,45 +220,54 @@ impl <R:  Read> Deflate<R> {
         }
     }
 
+    /// Reads in a non-compressed block header, returning the `NonCompressed`
+    /// descriptor for it.
+    /// RFC 3.2.4.
+    fn read_not_compressed_header(&mut self) -> io::Result<NonCompressed> {
+        let len = self.reader.read_aligned_le_u16()?;
+        let nlen = self.reader.read_aligned_le_u16()?;
+        if len != !nlen {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "LEN != ~NLEN"));
+        }
+        Ok(NonCompressed{ size: len as usize, offset: 0 })
+    }
+
+    /// Reads in a fixed Huffman-encoded header, returning the `Huffman`
+    /// descriptor for it.
+    /// RFC 3.2.6.
+    fn read_fixed_huffman_header(&mut self) -> io::Result<Huffman> {
+        // Literal and length codes
+        let mut litlen_lens = [0usize; 288];
+        for i in 000..=143 { litlen_lens[i] = 8; }
+        for i in 144..=255 { litlen_lens[i] = 9; }
+        for i in 256..=279 { litlen_lens[i] = 7; }
+        for i in 280..=287 { litlen_lens[i] = 8; }
+        let lit_len = Self::generate_huffman(&litlen_lens)?;
+        // Distance codes
+        let dist_lens = [5usize; 32];
+        let dist = Self::generate_huffman(&dist_lens)?;
+        Ok(Huffman{
+            lit_len,
+            dist,
+            backref: None,
+        })
+    }
+
     /// Reads in a block header, returning the `DeflateBlock` that describes it.
     /// RFC 3.2.3.
     fn read_block_header(&mut self) -> io::Result<DeflateBlock> {
         self.is_last_block = self.reader.read_bit()? != 0;
         let btype = self.reader.read_to_u8(2)?;
         match btype {
-            0b00 => {
-                // Non-compressed, RFC 3.2.4.
-                let len = self.reader.read_aligned_le_u16()?;
-                let nlen = self.reader.read_aligned_le_u16()?;
-                if len != !nlen {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, "LEN != ~NLEN"));
-                }
-                Ok(DeflateBlock::NonCompressed{ size: len as usize, offset: 0 })
-            },
-            0b01 => {
-                // Fixed Huffman codes, RFC 3.2.6.
-                // Literal and length codes
-                let mut litlen_lens = [0usize; 288];
-                for i in 000..=143 { litlen_lens[i] = 8; }
-                for i in 144..=255 { litlen_lens[i] = 9; }
-                for i in 256..=279 { litlen_lens[i] = 7; }
-                for i in 280..=287 { litlen_lens[i] = 8; }
-                let lit_len = Self::generate_huffman(&litlen_lens)?;
-                // Distance codes
-                let dist_lens = [5usize; 32];
-                let dist = Self::generate_huffman(&dist_lens)?;
-                Ok(DeflateBlock::Huffman{ lit_len, dist })
-            },
-            0b10 => {
-                // Dynamic Huffman codes, RFC 3.2.6.
-                unimplemented!("Parse dynamic huffman")
-            },
+            0b00 => Ok(DeflateBlock::NonCompressed(self.read_not_compressed_header()?)),
+            0b01 => Ok(DeflateBlock::Huffman(self.read_fixed_huffman_header()?)),
+            0b10 => unimplemented!("Parse dynamic huffman"),
             _ => Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid block type!")),
         }
     }
 
-    /// Decodes a symbol from the given dictionary.
-    fn decode(&mut self, dict: &HashMap<u16, u16>) -> io::Result<u16> {
+    /// Decodes a Huffman symbol from the given dictionary.
+    fn decode_huffman_symbol(&mut self, dict: &HashMap<u16, u16>) -> io::Result<u16> {
         let mut code = 1u16;
         for _ in 0..DEFLATE_MAX_BITS {
             code = (code << 1) | self.reader.read_bit()? as u16;
@@ -310,17 +278,90 @@ impl <R:  Read> Deflate<R> {
         Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid symbol code!"))
     }
 
+    /// Decodes the repetition length from the literal-length symbol.
+    /// RFC 3.2.5.
+    fn decode_huffman_length(&mut self, lit_len: u16) -> io::Result<usize> {
+        match lit_len {
+            x @ 257..=264 => Ok((x - 257 + 3) as usize),
+            x @ 265..=284 => {
+                let x0 = x - 265;
+                let increment = 2 << (x0 / 4);
+                let p2 = (1 << (x0 / 4 + 3)) - 8;
+                let len = (x0 % 4 * increment + p2 + 11) as usize;
+                let extra = (x0 / 4) + 1;
+                let extra = self.reader.read_to_u8(extra as usize)? as usize;
+                Ok(len + extra)
+            },
+            285 => Ok(258),
+            _ => Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid length symbol!")),
+        }
+    }
+
+    /// Decodes the repetition distance from the distance symbol.
+    /// RFC 3.2.5.
+    fn decode_huffman_distance(&mut self, sym: u16) -> io::Result<usize> {
+        match sym {
+            x @ 0..=3 => Ok((x + 1) as usize),
+            x @ 4..=29 => {
+                let x0 = x - 4;
+                let increment = 2 << (x0 / 2);
+                let p2 = (1 << (x0 / 2 + 2)) - 4;
+                let len = (x0 % 2 * increment + p2 + 5) as usize;
+                let extra = (x0 / 2) + 1;
+                let extra = self.reader.read_to_u8(extra as usize)? as usize;
+                Ok(len + extra)
+            },
+            _ => Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid distance symbol!")),
+        }
+    }
+
     /// Reads in a Huffman-encoded block to fill the given buffer as much as
-    /// possible. Returns a tuple of filled bytes and true, if the block has
+    /// possible. Returns a tuple of filled bytes and `true`, if the block has
     /// ended.
-    fn read_huffman(&mut self,
-        buf: &mut [u8],
-        lit_len: &HashMap<u16, u16>,
-        dist: &HashMap<u16, u16>,
-    ) -> io::Result<(usize, bool)> {
+    fn read_huffman(&mut self, buf: &mut [u8], state: &mut Huffman) -> io::Result<(usize, bool)> {
         let mut filled = 0;
-        while filled < buf.len() {
-            let sym = self.decode(lit_len)?;
+        loop {
+            // Check if we have read enough
+            if filled >= buf.len() {
+                return Ok((filled, false));
+            }
+            // Check if we have copies to do
+            if let Some((mut len, mut dist)) = state.backref {
+                println!("CONT BACKREF");
+                // Determine the most we can read
+                let rem_buf = &mut buf[filled..];
+                let can_read = std::cmp::min(len, rem_buf.len());
+                // TODO: All of this is bad
+                // Copy that amount
+                //let (w1, w2) = self.window.slice(dist, can_read);
+                // TODO: Inefficient
+                //let w1 = w1.to_vec();
+                //let w2 = w2.to_vec();
+                {
+                    // TODO: Inefficient
+                    let mut offs = 0;
+                    for _ in 0..can_read {
+                        let n = *self.window.at(dist);
+                        rem_buf[offs] = n;
+                        self.window.push(n);
+                        offs += 1;
+                    }
+                }
+                // We advanced that amount with the read
+                len -= can_read;
+                //dist += can_read as isize;
+                filled += can_read;
+                // If the len is 0, we are done copying
+                if len == 0 {
+                    state.backref = None;
+                }
+                else {
+                    state.backref = Some((len, dist));
+                }
+                continue;
+            }
+            // We need to read a symbol
+            let sym = self.decode_huffman_symbol(&state.lit_len)?;
             // Check if end of block
             if sym == 256 {
                 return Ok((filled, true));
@@ -328,56 +369,24 @@ impl <R:  Read> Deflate<R> {
             // Not end of block
             if sym < 256 {
                 // Simple symbol
+                //println!("DECODED: {}", sym as u8 as char);
                 buf[filled] = sym as u8;
                 self.window.push(sym as u8);
-                println!("DECODED: {}", buf[filled] as char);
                 filled += 1;
+                continue;
             }
-            else {
-                // Length and distance code, RFC 3.2.5.
-                // First decode the length with extra bits
-                let length = match sym {
-                    x @ 257..=264 => (x - 257 + 3) as usize,
-                    x @ 265..=284 => {
-                        let x0 = x - 265;
-                        let increment = 2 << (x0 / 4);
-                        let p2 = (1 << (x0 / 4 + 3)) - 8;
-                        let len = (x0 % 4 * increment + p2 + 11) as usize;
-                        let extra = (x0 / 4) + 1;
-                        let extra = self.reader.read_to_u8(extra as usize)? as usize;
-                        len + extra
-                    },
-                    285 => 258,
-                    _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid length symbol!")),
-                };
-                // Get distance symbol
-                let dist_sym = self.decode(dist)?;
-                // Decode the the distance symbol
-                let dist_len = match dist_sym {
-                    x @ 0..=3 => (x + 1) as usize,
-                    x @ 4..=29 => {
-                        let x0 = x - 4;
-                        let increment = 2 << (x0 / 2);
-                        let p2 = (1 << (x0 / 2 + 2)) - 4;
-                        let len = (x0 % 2 * increment + p2 + 5) as usize;
-                        let extra = (x0 / 2) + 1;
-                        let extra = self.reader.read_to_u8(extra as usize)? as usize;
-                        len + extra
-                    },
-                    _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid distance symbol!")),
-                };
-                // Copy to both output and window
-                // TODO: What if it doesn't fit this block?
-                // TODO: Very inefficient
-                println!("BACKREF {} {}", length, dist_len);
-                for _ in 0..length {
-                    buf[filled] = *self.window.at(self.window.len() - dist_len);
-                    self.window.push(buf[filled]);
-                    filled += 1;
-                }
-            }
+            // Length and distance code
+            // We decode the length from the already read symbol, since
+            // their dict. are unified
+            let length = self.decode_huffman_length(sym)?;
+            // Get distance symbol
+            let dist_sym = self.decode_huffman_symbol(&state.dist)?;
+            // Decode the the distance symbol
+            let dist = self.decode_huffman_distance(dist_sym)? as isize;
+            println!("BACKREF: {} {}", length, dist);
+            // Add it to the state
+            state.backref = Some((length, -dist));
         }
-        Ok((filled, false))
     }
 }
 
@@ -401,14 +410,13 @@ impl <R: Read> Read for Deflate<R> {
             // We must have some block here
             assert!(self.current_block.is_some());
             let mut block = self.current_block.take();
-            match &block.as_ref().unwrap() {
-                DeflateBlock::NonCompressed{ size, offset } => {
-                    unimplemented!("Read not compressed");
-                },
-                DeflateBlock::Huffman{ lit_len, dist } => {
-                    let (read, is_over) = self.read_huffman(&mut buf[filled..], lit_len, dist)?;
+            match block.as_mut().unwrap() {
+                DeflateBlock::NonCompressed(_nc) => unimplemented!("Read not compressed"),
+                DeflateBlock::Huffman(huffman) => {
+                    let (read, is_over) = self.read_huffman(&mut buf[filled..], huffman)?;
                     filled += read;
                     if is_over {
+                        self.window.clear();
                         block = None;
                     }
                 },
@@ -876,193 +884,6 @@ impl <R: Read + Seek> ZipArchive<R> {
     }
 }
 
-/*impl <R: Read> Read for Deflate<R> {
-    fn read(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
-        /*let mut filled = 0;
-        'outer: loop {
-            // Check if we have filled the buffer to the max
-            if buf.is_empty() {
-                return Ok(filled);
-            }
-            // Check if we don't have a block started
-            if self.current_block.is_none() {
-                // No block started, but if we were on the last block before,
-                // we can't read more
-                if self.is_last_block {
-                    return Ok(filled);
-                }
-                // We can read in a block header
-                self.is_last_block = self.reader.read_bit()? != 0;
-                let btype = (self.reader.read_bit()? << 1)
-                           | self.reader.read_bit()?;
-                if btype == 0b00 {
-                    // Uncompressed block, let's read LEN and NLEN
-                    self.reader.skip_to_byte();
-                    let len = self.reader.read_aligned_le_u16()?;
-                    let nlen = self.reader.read_aligned_le_u16()?;
-                    if len != !nlen {
-                        return Err(io::Error::new(io::ErrorKind::InvalidData,
-                            "LEN != ~NLEN!"));
-                    }
-                    // Assign as current state
-                    self.current_block = Some(DeflateBlock::Uncompressed{
-                        size: len as usize,
-                        offset: 0,
-                    });
-                }
-                else if btype == 0b01 {
-                    unimplemented!("Fixed Huffman block");
-                }
-                else if btype == 0b10 {
-                    // 3.2.7
-                    // Read in the metadata
-                    let hlit = self.reader.read_bits_to_u8(5)? as usize + 257;
-                    let hdist = self.reader.read_bits_to_u8(5)? as usize + 1;
-                    let hclen = self.reader.read_bits_to_u8(4)? as usize + 4;
-                    // Read the code length of code lengths
-                    let mut code_len_code_lens = [0usize; 19];
-                    code_len_code_lens[16] = self.reader.read_bits_to_u8(3)? as usize;
-                    code_len_code_lens[17] = self.reader.read_bits_to_u8(3)? as usize;
-                    code_len_code_lens[18] = self.reader.read_bits_to_u8(3)? as usize;
-                    code_len_code_lens[00] = self.reader.read_bits_to_u8(3)? as usize;
-                    // Found a dank formula
-                    for i in 0..(hclen as isize - 4) {
-                        let n = 8 + (i + 1) / 2 * (1 - i % 2 * 2);
-                        code_len_code_lens[n as usize] = self.reader.read_bits_to_u8(3)? as usize;
-                    }
-                    // Code length codes
-                    let code_len_code = generate_huffman(&code_len_code_lens)?;
-                    // Decode code lengths
-                    let mut code_lens = Vec::with_capacity(hlit + hdist);
-                    for _ in 0..(hlit + hdist) {
-                        let sym = self.reader.decode(DEFLATE_MAX_BITS, &code_len_code)?;
-                        if sym < 16 {
-                            // Literal
-                            code_lens.push(sym as usize);
-                            continue;
-                        }
-                        // Some kind of repetition
-                        let mut repeat_val = 0;
-                        let repeat_len;
-                        match sym {
-                            16 => {
-                                if code_lens.is_empty() {
-                                    return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                        "Repetition symbol at first place!"));
-                                }
-                                repeat_val = *code_lens.last().unwrap();
-                                repeat_len = self.reader.read_bits_to_u8(2)? as usize + 3;
-                            },
-                            17 => {
-                                repeat_len = self.reader.read_bits_to_u8(3)? as usize + 3;
-                            },
-                            18 => {
-                                repeat_len = self.reader.read_bits_to_u8(7)? as usize + 11;
-                            },
-                            _ => {
-                                return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                    "Symbol out of range!"));
-                            }
-                        }
-                        // Bounds check
-                        if code_lens.len() + repeat_len > hlit + hdist {
-                            return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                "Symbol repetition out of range!"));
-                        }
-                        // Add repeated
-                        for _ in 0..repeat_len { code_lens.push(repeat_val); }
-                    }
-                    // Get the literal and length codes
-                    let lit_code = generate_huffman(&code_lens[0..hlit])?;
-                    // Now distance codes
-                    let dist_code_len = &code_lens[hlit..];
-                    let mut dist_code = None;
-                    if dist_code_len.len() == 1 && dist_code_len[0] == 0 {
-                        // No distance-codes are used, all literals
-                    }
-                    else {
-                        // Now we need to fill our Huffman-tree
-                        let mut once = 0;
-                        let mut multiple = 0;
-                        for i in dist_code_len {
-                            if *i == 1 {
-                                once += 1;
-                            }
-                            else if *i > 1 {
-                                multiple += 1;
-                            }
-                        }
-                        if once == 1 && multiple == 0 {
-                            // A single code-length of one, with one unused code
-                            unimplemented!();
-                        }
-                        dist_code = Some(generate_huffman(dist_code_len)?);
-                    }
-                    // Assign as current state
-                    // NOTE: For optimization we could pre-allocate this buffer
-                    // so all Huffman block can share it
-                    self.current_block = Some(DeflateBlock::Huffman{
-                        lit_len: lit_code,
-                        dist: dist_code,
-                        window: SlidingWindow::new(32768),
-                    });
-                }
-                else {
-                    unimplemented!("ILLEGAL BLOCK");
-                }
-            }
-            // We must have a block here
-            assert!(self.current_block.is_some());
-            let current_block = self.current_block.as_ref().unwrap();
-            match current_block {
-                DeflateBlock::Uncompressed{ size, offset } => {
-                    // Check if we have read enough
-                    if *size <= *offset {
-                        // Enough, clear state, go to next block
-                        self.current_block = None;
-                        continue 'outer;
-                    }
-                    // How much we can read
-                    let block_rem = *size - *offset;
-                    let can_read = std::cmp::min(buf.len(), block_rem);
-                    // Read into the sub-buffer
-                    let sub_buf = &mut buf[0..can_read];
-                    self.reader.read_to_buffer(sub_buf)?;
-                    // Keep track
-                    filled += can_read;
-                    buf = &mut buf[can_read..];
-                },
-                DeflateBlock::Huffman{ lit_len, dist, window } => {
-                    loop {
-                        if buf.is_empty() {
-                            continue 'outer;
-                        }
-                        // We can still fill
-                        let sym = self.reader.decode(DEFLATE_MAX_BITS, lit_len)?;
-                        println!("Symbol: {}", sym);
-                        if sym == 256 {
-                            // End of block
-                            self.current_block = None;
-                            continue 'outer;
-                        }
-                        if sym < 256 {
-                            // Raw literal
-                            filled += 1;
-                            buf[0] = sym as u8;
-                            buf = &mut buf[1..];
-                        }
-                        else {
-                            unimplemented!("Backref!");
-                        }
-                    }
-                },
-                _ => unimplemented!("Unhandled state"),
-            }
-        }*/
-        Ok(0)
-    }
-}*/
-
 /// Decodes an UTF8 String.
 fn decode_utf8(bs: &[u8]) -> String {
     String::from_utf8_lossy(bs).into_owned()
@@ -1128,17 +949,11 @@ pub fn test(path: impl AsRef<Path>) {
         0
     ];
     let mut deflate = Deflate::new(data);
-    //let mut buffer = Vec::new();
-    // Cheating!
-    let mut buffer = [0u8; 300];
-    deflate.read_exact(&mut buffer).expect("msg: &str");
-    //let mut buffer = [0u8; 16];
-    //deflate.read_exact(&mut buffer);
-    println!("ASD");
+    let mut buffer = Vec::new();
+    deflate.read_to_end(&mut buffer).expect("msg: &str");
     for c in buffer.iter() {
         print!("{}", *c as char);
     }
-    println!("DEF");
 
     /*let f = fs::File::open(path).unwrap();
     let mut fr = ByteReader::new(f).expect("msg: &str");
