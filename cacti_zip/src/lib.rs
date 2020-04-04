@@ -127,9 +127,17 @@ impl <T> SlidingWindow<T> {
         self.cursor = 0;
     }
 
-    // TODO: This is bad
-    fn at(&self, i: isize) -> &T {
-        &self.buffer[(self.cursor as isize + i) as usize]
+    /// Copies the back-referenced balued into the buffer and returns the
+    /// referenced region.
+    fn backreference(&mut self, dist: isize, len: usize) -> (&[T], &[T]) where T: Clone {
+        assert_ne!(dist, 0);
+        // TODO: Pretty inefficient and incorrect
+        let start = (self.cursor as isize + dist) as usize;
+        for i in 0..len {
+            self.push(self.buffer[start + i].clone());
+        }
+        // TODO: Incorrect
+        (&self.buffer[start..(start + len)], &self.buffer[0..0])
     }
 }
 
@@ -326,27 +334,15 @@ impl <R:  Read> Deflate<R> {
                 return Ok((filled, false));
             }
             // Check if we have copies to do
-            if let Some((mut len, mut dist)) = state.backref {
-                println!("CONT BACKREF");
+            if let Some((mut len, dist)) = state.backref {
                 // Determine the most we can read
                 let rem_buf = &mut buf[filled..];
                 let can_read = std::cmp::min(len, rem_buf.len());
-                // TODO: All of this is bad
                 // Copy that amount
-                //let (w1, w2) = self.window.slice(dist, can_read);
-                // TODO: Inefficient
-                //let w1 = w1.to_vec();
-                //let w2 = w2.to_vec();
-                {
-                    // TODO: Inefficient
-                    let mut offs = 0;
-                    for _ in 0..can_read {
-                        let n = *self.window.at(dist);
-                        rem_buf[offs] = n;
-                        self.window.push(n);
-                        offs += 1;
-                    }
-                }
+                let (w1, w2) = self.window.backreference(dist, can_read);
+                rem_buf[..w1.len()].copy_from_slice(w1);
+                let rem_buf = &mut rem_buf[w1.len()..];
+                rem_buf[..w2.len()].copy_from_slice(w2);
                 // We advanced that amount with the read
                 len -= can_read;
                 //dist += can_read as isize;
@@ -369,7 +365,6 @@ impl <R:  Read> Deflate<R> {
             // Not end of block
             if sym < 256 {
                 // Simple symbol
-                //println!("DECODED: {}", sym as u8 as char);
                 buf[filled] = sym as u8;
                 self.window.push(sym as u8);
                 filled += 1;
@@ -383,7 +378,6 @@ impl <R:  Read> Deflate<R> {
             let dist_sym = self.decode_huffman_symbol(&state.dist)?;
             // Decode the the distance symbol
             let dist = self.decode_huffman_distance(dist_sym)? as isize;
-            println!("BACKREF: {} {}", length, dist);
             // Add it to the state
             state.backref = Some((length, -dist));
         }
