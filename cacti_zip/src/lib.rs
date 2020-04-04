@@ -948,28 +948,6 @@ pub fn test(path: impl AsRef<Path>) {
     for c in buffer.iter() {
         print!("{}", *c as char);
     }
-
-    /*let f = fs::File::open(path).unwrap();
-    let mut fr = ByteReader::new(f).expect("msg: &str");
-    let entries = parse_central_directory(&mut fr).expect("msg: &str");
-
-    // Let's pick index 3 for now
-    let e = &entries[3];
-    println!("{}", e.file_name);
-    assert!(!e.is_flag(0)); // Must not be encrypted
-
-    // Jump to the local header
-    println!("Offset: {}", e.local_header_offset);
-    fr.set_offset(e.local_header_offset as usize).expect("msg: &str");
-    // Read local header
-    let (local_header, _) = LocalFileHeader::parse(&mut fr).expect("msg: &str");
-    println!("Name in local header: {}", local_header.file_name);*/
-
-    // Now we are at the local data
-    //let mut deflate = Deflate::new(fr.reader_ref(), e.compressed_size);
-    //let mut bytes = Vec::new();
-    //let read = deflate.read_to_end(&mut bytes).expect("msg: &str");
-    //println!("Read in {}", read);
 }
 
 #[cfg(test)]
