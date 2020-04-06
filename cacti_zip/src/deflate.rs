@@ -297,7 +297,11 @@ impl <R:  Read> Deflate<R> {
             }
             // If one distance is defined, complete the tree
             if one == 1 && more == 0 {
-                unimplemented!()
+                // We have one unused code
+                let mut dist_codelens = dist_codelens.to_vec();
+                dist_codelens.resize(32, 0);
+                dist_codelens[31] = 1;
+                Self::generate_huffman(&dist_codelens)?
             }
             else {
                 Self::generate_huffman(dist_codelens)?
