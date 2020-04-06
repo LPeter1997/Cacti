@@ -18,7 +18,8 @@ struct SlidingWindow {
 }
 
 impl std::fmt::Debug for SlidingWindow {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, _f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        // TODO
         unimplemented!();
     }
 }
@@ -46,11 +47,6 @@ impl SlidingWindow {
         for e in elements {
             self.push(*e);
         }
-    }
-
-    /// Clears this `SlidingWindow`, removing all elements.
-    fn clear(&mut self) {
-        self.cursor = 0;
     }
 
     /// Returns the buffer index corresponding to the given dostance from the
@@ -257,7 +253,7 @@ impl <R:  Read> Deflate<R> {
         codelen_codelens[00] = self.reader.read_to_u8(3)? as usize;
         for i in 0..(n_codelen_codes - 4) {
             // A dank formula
-            let mul = if i % 2 == 0 { 1isize } else { -1 };
+            let mul = 1 - (((i as isize % 2) * 2) as isize);
             let idx = (8 + (i as isize + 1) / 2 * mul) as usize;
             codelen_codelens[idx] = self.reader.read_to_u8(3)? as usize;
         }
