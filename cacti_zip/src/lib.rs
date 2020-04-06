@@ -516,34 +516,12 @@ fn decode_cp437(bs: &[u8]) -> String {
 }
 
 pub fn test(path: impl AsRef<Path>) {
+    use std::io::Write;
+
     let file = fs::File::open(path).expect("msg: &str");
     let mut deflate = Deflate::new(file);
     let mut buffer = Vec::new();
     deflate.read_to_end(&mut buffer).expect("msg: &str");
-    for c in buffer.iter() {
-        print!("{}", *c as char);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_bit_reader() -> io::Result<()> {
-        let bytes = [0b10110101, 0b01110110, 0b00101011, 0b11000101];
-        let bytes: &[u8] = &bytes;
-        let mut r = BitReader::new(bytes);
-        r.skip_to_byte(); // Must be no-op
-        assert_eq!(r.read_bit()?, 1);
-        assert_eq!(r.read_bit()?, 0);
-        assert_eq!(r.read_to_u8(4)?, 0b1101);
-        assert_eq!(r.read_to_u8(5)?, 0b11010);
-        assert_eq!(r.read_to_u8(4)?, 0b1110);
-        r.skip_to_byte();  // Must be no-op
-        assert_eq!(r.read_to_u8(3)?, 0b011);
-        r.skip_to_byte();
-        assert_eq!(r.read_to_u8(4)?, 0b0101);
-        Ok(())
-    }
+    let mut outfile = fs::File::create("C:/TMP/skeletor2.png").expect("msg: &str");
+    outfile.write_all(&buffer).expect("msg: &str");
 }

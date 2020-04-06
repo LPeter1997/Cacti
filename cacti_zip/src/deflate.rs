@@ -209,6 +209,101 @@ impl <R:  Read> Deflate<R> {
         })
     }
 
+    /// Reads in a dynamic Huffman-encoded header, returning the `Huffman`
+    /// descriptor for it.
+    /// RFC 3.2.7.
+    fn read_dynamic_huffman_header(&mut self)  -> Result<Huffman> {
+        let n_litlen = self.reader.read_to_u8(5)? as usize + 257;
+        let n_dist = self.reader.read_to_u8(5)? as usize + 1;
+        let n_codelen_codes = self.reader.read_to_u8(4)? as usize + 4;
+
+        // Code length code lengths
+        let mut codelen_codelens = [0usize; 19];
+        codelen_codelens[16] = self.reader.read_to_u8(3)? as usize;
+        codelen_codelens[17] = self.reader.read_to_u8(3)? as usize;
+        codelen_codelens[18] = self.reader.read_to_u8(3)? as usize;
+        codelen_codelens[00] = self.reader.read_to_u8(3)? as usize;
+        for i in 0..(n_codelen_codes - 4) {
+            // A dank formula
+            let mul = if i % 2 == 0 { 1isize } else { -1 };
+            let idx = (8 + (i as isize + 1) / 2 * mul) as usize;
+            codelen_codelens[idx] = self.reader.read_to_u8(3)? as usize;
+        }
+
+        // Construct the code-length code
+        let codelen_code = Self::generate_huffman(&codelen_codelens)?;
+
+        // We decode all code-lengths in one go, as their processing is the same
+        // NOTE: We could just have an array here
+        let mut all_codelens = vec![0usize; n_litlen + n_dist];
+        let mut codelen_idx = 0;
+        while codelen_idx < all_codelens.len() {
+            let sym = self.decode_huffman_symbol(&codelen_code)? as usize;
+            if sym < 16 {
+                // Simple length
+                all_codelens[codelen_idx] = sym;
+                codelen_idx += 1;
+                continue;
+            }
+            // Repetition
+            let mut sym_to_repeat = 0;
+            let repeat = match sym {
+                16 => {
+                    if codelen_idx == 0 {
+                        return Err(Error::new(ErrorKind::InvalidData, "No code length to repeat!"));
+                    }
+                    sym_to_repeat = all_codelens[codelen_idx - 1];
+                    self.reader.read_to_u8(2)? as usize + 3
+                },
+                17 => self.reader.read_to_u8(3)? as usize + 3,
+                18 => self.reader.read_to_u8(7)? as usize + 11,
+                _ => return Err(Error::new(ErrorKind::InvalidData, "Illegal code length symbol!")),
+            };
+            for _ in 0..repeat {
+                all_codelens[codelen_idx] = sym_to_repeat;
+                codelen_idx += 1;
+            }
+        }
+
+        // Construct lit-len codes
+        let litlen_codelens = &all_codelens[0..n_litlen];
+        let lit_len = Self::generate_huffman(litlen_codelens)?;
+
+        // Construct distance codes, but also check RFC stuff
+        let dist_codelens = &all_codelens[n_litlen..];
+        let dist = if dist_codelens.len() == 1 && dist_codelens[0] == 0 {
+            // Just literals
+            HashMap::new()
+        }
+        else {
+            let mut one = 0;
+            let mut more = 0;
+            for d in dist_codelens.iter() {
+                if *d == 1 {
+                    one += 1;
+                }
+                else if *d > 1 {
+                    more += 1;
+                }
+            }
+            // If one distance is defined, complete the tree
+            if one == 1 && more == 0 {
+                unimplemented!()
+            }
+            else {
+                Self::generate_huffman(dist_codelens)?
+            }
+        };
+
+        // TODO: Anything else?
+
+        Ok(Huffman{
+            lit_len,
+            dist,
+            backref: None,
+        })
+    }
+
     /// Reads in a block header, returning the `DeflateBlock` that describes it.
     /// RFC 3.2.3.
     fn read_block_header(&mut self) -> Result<DeflateBlock> {
@@ -217,7 +312,7 @@ impl <R:  Read> Deflate<R> {
         match btype {
             0b00 => Ok(DeflateBlock::NonCompressed(self.read_not_compressed_header()?)),
             0b01 => Ok(DeflateBlock::Huffman(self.read_fixed_huffman_header()?)),
-            0b10 => unimplemented!("Parse dynamic huffman"),
+            0b10 => Ok(DeflateBlock::Huffman(self.read_dynamic_huffman_header()?)),
             _ => Err(Error::new(ErrorKind::InvalidData, "Invalid block type!")),
         }
     }
@@ -279,7 +374,7 @@ impl <R:  Read> Deflate<R> {
                 let p2 = (1 << (x0 / 2 + 2)) - 4;
                 let len = (x0 % 2 * increment + p2 + 5) as usize;
                 let extra = (x0 / 2) + 1;
-                let extra = self.reader.read_to_u8(extra as usize)? as usize;
+                let extra = self.reader.read_to_u16(extra as usize)? as usize;
                 Ok(len + extra)
             },
             _ => Err(Error::new(ErrorKind::InvalidData, "Invalid distance symbol!")),

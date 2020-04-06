@@ -58,6 +58,23 @@ impl <R: Read> BitReader<R> {
         Ok(result)
     }
 
+    /// Reads in multiple bits into a `u16`.
+    ///
+    /// # Errors
+    ///
+    /// In case of an IO error or a `count` greater than `16`, an error variant
+    /// is returned.
+    pub fn read_to_u16(&mut self, count: usize) -> Result<u16> {
+        if count > 16 {
+            return Err(Error::new(ErrorKind::InvalidInput, "Can't read > 16 bits into an u16!"));
+        }
+        let mut result = 0u16;
+        for i in 0..count {
+            result |= (self.read_bit()? as u16) << i;
+        }
+        Ok(result)
+    }
+
     /// Skips to the start of next byte. If already on a byte-boundlary, this is
     /// a no-op.
     pub fn skip_to_byte(&mut self) {
