@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::io::{Result, Error, ErrorKind, Read};
+use std::mem::MaybeUninit;
 use crate::BitReader;
 
 /// The number of bytes the DEFLATE algorithm can reference back.
@@ -11,17 +12,22 @@ const MAX_CODE_BITS: usize = 15;
 
 /// A fixed-size sliding window implementation using a circular buffer. This is
 /// to store the last 32 KiB for backreferences.
-#[derive(Debug)]
 struct SlidingWindow {
-    buffer: Box<[u8]>,
+    buffer: Box<[u8; WINDOW_LENGTH]>,
     cursor: usize,
 }
 
+impl std::fmt::Debug for SlidingWindow {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        unimplemented!();
+    }
+}
+
 impl SlidingWindow {
-    /// Creates a new `SlidingWindow` with the given fixed capacity.
-    fn with_capacity(capacity: usize) -> Self {
+    /// Creates a new `SlidingWindow`.
+    fn new() -> Self {
         Self{
-            buffer: vec![0u8; capacity].into_boxed_slice(),
+            buffer: unsafe { Box::new(MaybeUninit::uninit().assume_init()) },
             cursor: 0,
         }
     }
@@ -50,7 +56,7 @@ impl SlidingWindow {
     /// Returns the buffer index corresponding to the given dostance from the
     /// cursor.
     fn buffer_index_of_dist(&self, dist: isize) -> usize {
-        (((self.buffer.len() + self.cursor) as isize + dist) % self.buffer.len() as isize) as usize
+        ((self.cursor as isize + dist) as usize) % self.buffer.len()
     }
 
     /// Returns the element the given distance away from the cursor.
@@ -159,7 +165,7 @@ impl <R:  Read> Deflate<R> {
             is_last_block: false,
             current_block: None,
             // NOTE: We could lazily allocate this when needed
-            window: SlidingWindow::with_capacity(WINDOW_LENGTH),
+            window: SlidingWindow::new(),
         }
     }
 
