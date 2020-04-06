@@ -222,6 +222,19 @@ impl <R:  Read> Deflate<R> {
         }
     }
 
+    // Reading non-compressed blocks ///////////////////////////////////////////
+
+    /// Reads in a non-compressed block to fill the given buffer as much as
+    /// possible. Returns a tuple of filled bytes and `true`, if the block has
+    /// ended.
+    fn read_non_compressed(&mut self, buf: &mut [u8], state: &mut NonCompressed) -> Result<(usize, bool)> {
+        let rem = state.size - state.copied;
+        let can_read = std::cmp::min(rem, buf.len());
+        self.reader.read_aligned_to_buffer(&mut buf[..can_read])?;
+        state.copied += can_read;
+        Ok((can_read, state.size == state.copied))
+    }
+
     // Decoding Huffman-encoded blocks /////////////////////////////////////////
 
     /// Decodes a Huffman symbol from the given dictionary.
@@ -354,7 +367,13 @@ impl <R: Read> Read for Deflate<R> {
             assert!(self.current_block.is_some());
             let mut block = self.current_block.take();
             match block.as_mut().unwrap() {
-                DeflateBlock::NonCompressed(_nc) => unimplemented!("Read not compressed"),
+                DeflateBlock::NonCompressed(nc) => {
+                    let (read, is_over) = self.read_non_compressed(&mut buf[filled..], nc)?;
+                    filled += read;
+                    if is_over {
+                        block = None;
+                    }
+                },
                 DeflateBlock::Huffman(huffman) => {
                     let (read, is_over) = self.read_huffman(&mut buf[filled..], huffman)?;
                     filled += read;

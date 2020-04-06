@@ -8,6 +8,7 @@ use deflate::Deflate;
 use std::path::Path;
 use std::io::{Read, Seek, SeekFrom};
 use std::io;
+use std::fs;
 
 /// The internal reader.
 #[derive(Debug)]
@@ -515,19 +516,8 @@ fn decode_cp437(bs: &[u8]) -> String {
 }
 
 pub fn test(path: impl AsRef<Path>) {
-    let data: &[u8] = &[
-        227, 229, 42, 203, 207, 76, 81, 72, 41, 74, 44, 215, 200, 204, 43, 81,
-        200, 211, 84, 168, 230, 229, 82, 0, 130, 180, 252, 34, 5, 176, 80, 166,
-        130, 173, 130, 129, 53, 144, 178, 81, 200, 179, 86, 208, 214, 206, 132,
-        43, 1, 129, 130, 210, 146, 228, 140, 196, 34, 13, 117, 7, 117, 77, 107,
-        136, 112, 45, 132, 130, 203, 212, 192, 101, 72, 53, 83, 129, 6, 102,
-        162, 184, 19, 136, 120, 185, 64, 154, 115, 19, 51, 243, 192, 166, 36,
-        22, 165, 39, 235, 40, 128, 148, 106, 105, 129, 56, 101, 216, 3, 196, 16,
-        98, 145, 57, 22, 139, 138, 128, 106, 210, 52, 148, 98, 242, 98, 242, 84,
-        83, 172, 98, 242, 148, 116, 20, 50, 97, 86, 130, 0, 36, 172, 81, 29, 1,
-        0
-    ];
-    let mut deflate = Deflate::new(data);
+    let file = fs::File::open(path).expect("msg: &str");
+    let mut deflate = Deflate::new(file);
     let mut buffer = Vec::new();
     deflate.read_to_end(&mut buffer).expect("msg: &str");
     for c in buffer.iter() {
