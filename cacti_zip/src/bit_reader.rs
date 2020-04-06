@@ -22,6 +22,13 @@ impl <R: Read> BitReader<R> {
         }
     }
 
+    /// Utility for reading the next byte from the underlying reader.
+    fn read_next_byte(&mut self) -> Result<u8> {
+        let mut bs: [u8; 1] = [0];
+        self.reader.read_exact(&mut bs)?;
+        Ok(bs[0])
+    }
+
     /// Reads the next bit from the stream. Either `1` or `0`.
     ///
     /// # Errors
@@ -31,9 +38,7 @@ impl <R: Read> BitReader<R> {
         if self.bit_index == 8 {
             // Read next byte
             self.bit_index = 0;
-            let mut bs: [u8; 1] = [0];
-            self.reader.read_exact(&mut bs)?;
-            self.current_byte = bs[0];
+            self.current_byte = self.read_next_byte()?;
         }
         // Get bit
         let bit = (self.current_byte >> self.bit_index) & 0b1;
