@@ -5,10 +5,13 @@ use bit_reader::BitReader;
 mod deflate;
 use deflate::Deflate;
 
-use std::path::Path;
 use std::io::{Read, Seek, SeekFrom};
 use std::io;
-use std::fs;
+
+pub fn decompress(bytes: &[u8], target: &mut Vec<u8>) {
+    let mut defl = Deflate::new(bytes);
+    defl.read_to_end(target).expect("Could not decompress!");
+}
 
 /// The internal reader.
 #[derive(Debug)]
@@ -513,15 +516,4 @@ fn decode_cp437(bs: &[u8]) -> String {
         result.push(ch);
     }
     result
-}
-
-pub fn test(path: impl AsRef<Path>) {
-    use std::io::Write;
-
-    let file = fs::File::open(path).expect("msg: &str");
-    let mut deflate = Deflate::new(file);
-    let mut buffer = Vec::new();
-    deflate.read_to_end(&mut buffer).expect("msg: &str");
-    let mut outfile = fs::File::create("C:/TMP/skeletor2.png").expect("msg: &str");
-    outfile.write_all(&buffer).expect("msg: &str");
 }

@@ -50,13 +50,7 @@ impl SlidingWindow {
     /// Returns the buffer index corresponding to the given dostance from the
     /// cursor.
     fn buffer_index_of_dist(&self, dist: isize) -> usize {
-        let start = (self.cursor as isize + dist) % self.buffer.len() as isize;
-        if start < 0 {
-            (self.buffer.len() as isize + start) as usize
-        }
-        else {
-            start as usize
-        }
+        (((self.buffer.len() + self.cursor) as isize + dist) % self.buffer.len() as isize) as usize
     }
 
     /// Returns the element the given distance away from the cursor.
@@ -65,14 +59,12 @@ impl SlidingWindow {
         self.buffer[idx]
     }
 
-    // NOTE: This could be optimized for some cases but it's not that trivial to
-    // do so.
-    /// Copies the back-referenced slice into the buffer and returns the
-    /// newly inserted region.
-    fn backreference(&mut self, dist: isize, len: usize) -> (&[u8], &[u8]) {
-        if len == 0 {
-            return (&self.buffer[0..0], &self.buffer[0..0]);
-        }
+    /// Copies the back-referenced slice into the buffer and returns the newly
+    /// inserted region as a pair of slices.
+    ///
+    /// This implementation only goes for correctness, no optimizations are
+    /// performed.
+    fn backreference_trivial(&mut self, dist: isize, len: usize) -> (&[u8], &[u8]) {
         let start = self.cursor;
         for _ in 0..len {
             let e = self.peek(dist);
@@ -86,6 +78,31 @@ impl SlidingWindow {
         else {
             (&self.buffer[start..end], &self.buffer[0..0])
         }
+    }
+
+    // NOTE: This could be optimized further for some cases but it's not that
+    // trivial to do so.
+    /// Copies the back-referenced slice into the buffer and returns the newly
+    /// inserted region as a pair of slices.
+    fn backreference(&mut self, dist: isize, len: usize) -> (&[u8], &[u8]) {
+        let start_copy = self.buffer_index_of_dist(dist);
+        let end_copy = (start_copy + len) % self.buffer.len();
+
+        if     self.cursor + len <= self.buffer.len()
+            && start_copy <= end_copy
+            && (start_copy >= self.cursor + len || end_copy < self.cursor) {
+
+            // Trivial memcopy
+            let src = self.buffer[start_copy..].as_ptr();
+            let dst = self.buffer[self.cursor..].as_mut_ptr();
+            unsafe { std::ptr::copy_nonoverlapping(src, dst, len) };
+            let result_slice = &self.buffer[self.cursor..(self.cursor + len)];
+            self.cursor = (self.cursor + len) % self.buffer.len();
+            return (result_slice, &self.buffer[0..0]);
+        }
+
+        // Fallback
+        self.backreference_trivial(dist, len)
     }
 }
 
