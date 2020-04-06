@@ -33,6 +33,15 @@ impl SlidingWindow {
         self.cursor = (self.cursor + 1) % self.buffer.len();
     }
 
+    // NOTE: This could be optimized for some cases but it's not that trivial to
+    // do so.
+    /// Adds a slice to the `SlidingWindow`.
+    fn push_slice(&mut self, elements: &[u8]) {
+        for e in elements {
+            self.push(*e);
+        }
+    }
+
     /// Clears this `SlidingWindow`, removing all elements.
     fn clear(&mut self) {
         self.cursor = 0;
@@ -295,8 +304,6 @@ impl <R:  Read> Deflate<R> {
             }
         };
 
-        // TODO: Anything else?
-
         Ok(Huffman{
             lit_len,
             dist,
@@ -326,6 +333,7 @@ impl <R:  Read> Deflate<R> {
         let rem = state.size - state.copied;
         let can_read = std::cmp::min(rem, buf.len());
         self.reader.read_aligned_to_buffer(&mut buf[..can_read])?;
+        self.window.push_slice(&buf[..can_read]);
         state.copied += can_read;
         Ok((can_read, state.size == state.copied))
     }
@@ -461,22 +469,15 @@ impl <R: Read> Read for Deflate<R> {
             // We must have some block here
             assert!(self.current_block.is_some());
             let mut block = self.current_block.take();
-            match block.as_mut().unwrap() {
-                DeflateBlock::NonCompressed(nc) => {
-                    let (read, is_over) = self.read_non_compressed(&mut buf[filled..], nc)?;
-                    filled += read;
-                    if is_over {
-                        block = None;
-                    }
-                },
-                DeflateBlock::Huffman(huffman) => {
-                    let (read, is_over) = self.read_huffman(&mut buf[filled..], huffman)?;
-                    filled += read;
-                    if is_over {
-                        self.window.clear();
-                        block = None;
-                    }
-                },
+            let (read, is_over) = match block.as_mut().unwrap() {
+                DeflateBlock::NonCompressed(nc) =>
+                    self.read_non_compressed(&mut buf[filled..], nc)?,
+                DeflateBlock::Huffman(huffman) =>
+                    self.read_huffman(&mut buf[filled..], huffman)?,
+            };
+            filled += read;
+            if is_over {
+                block = None;
             }
             self.current_block = block;
         }
