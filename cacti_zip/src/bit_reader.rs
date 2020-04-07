@@ -73,12 +73,31 @@ impl <R: Read> BitReader<R> {
     #[inline(always)]
     pub fn peek_to_u8(&mut self, count: usize) -> Result<u8> {
         const MASKS: [u32; 9] = [
-            0b00000000,
+                                                0b00000000,
             0b00000001, 0b00000011, 0b00000111, 0b00001111,
             0b00011111, 0b00111111, 0b01111111, 0b11111111,
         ];
         self.ensure_peek()?;
         let result = ((self.peek_buffer_as_u32() >> self.bit_index) & MASKS[count]) as u8;
+        Ok(result)
+    }
+
+    /// Peeks multiple bits without consumption, assembling it into an `u16`.
+    ///
+    /// # Errors
+    ///
+    /// In case of an IO error, an error variant is returned.
+    #[inline(always)]
+    pub fn peek_to_u16(&mut self, count: usize) -> Result<u16> {
+        const MASKS: [u32; 17] = [
+                                                                        0b0000000000000000,
+            0b0000000000000001, 0b0000000000000011, 0b0000000000000111, 0b0000000000001111,
+            0b0000000000011111, 0b0000000000111111, 0b0000000001111111, 0b0000000011111111,
+            0b0000000111111111, 0b0000001111111111, 0b0000011111111111, 0b0000111111111111,
+            0b0001111111111111, 0b0011111111111111, 0b0111111111111111, 0b1111111111111111,
+        ];
+        self.ensure_peek()?;
+        let result = ((self.peek_buffer_as_u32() >> self.bit_index) & MASKS[count]) as u16;
         Ok(result)
     }
 
@@ -101,15 +120,7 @@ impl <R: Read> BitReader<R> {
     /// In case of an IO error, an error variant is returned.
     #[inline(always)]
     pub fn read_to_u16(&mut self, count: usize) -> Result<u16> {
-        const MASKS: [u32; 17] = [
-            0b0000000000000000,
-            0b0000000000000001, 0b0000000000000011, 0b0000000000000111, 0b0000000000001111,
-            0b0000000000011111, 0b0000000000111111, 0b0000000001111111, 0b0000000011111111,
-            0b0000000111111111, 0b0000001111111111, 0b0000011111111111, 0b0000111111111111,
-            0b0001111111111111, 0b0011111111111111, 0b0111111111111111, 0b1111111111111111,
-        ];
-        self.ensure_peek()?;
-        let result = ((self.peek_buffer_as_u32() >> self.bit_index) & MASKS[count]) as u16;
+        let result = self.peek_to_u16(count)?;
         self.bit_index += count;
         Ok(result)
     }
