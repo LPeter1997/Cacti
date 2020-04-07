@@ -65,13 +65,13 @@ impl <R: Read> BitReader<R> {
         Ok(result)
     }
 
-    /// Reads in multiple bits into an `u8`.
+    /// Peeks multiple bits without consumption, assembling it into an `u8`.
     ///
     /// # Errors
     ///
     /// In case of an IO error, an error variant is returned.
     #[inline(always)]
-    pub fn read_to_u8(&mut self, count: usize) -> Result<u8> {
+    pub fn peek_to_u8(&mut self, count: usize) -> Result<u8> {
         const MASKS: [u32; 9] = [
             0b00000000,
             0b00000001, 0b00000011, 0b00000111, 0b00001111,
@@ -79,6 +79,17 @@ impl <R: Read> BitReader<R> {
         ];
         self.ensure_peek()?;
         let result = ((self.peek_buffer_as_u32() >> self.bit_index) & MASKS[count]) as u8;
+        Ok(result)
+    }
+
+    /// Reads in multiple bits into an `u8`.
+    ///
+    /// # Errors
+    ///
+    /// In case of an IO error, an error variant is returned.
+    #[inline(always)]
+    pub fn read_to_u8(&mut self, count: usize) -> Result<u8> {
+        let result = self.peek_to_u8(count)?;
         self.bit_index += count;
         Ok(result)
     }
@@ -109,6 +120,12 @@ impl <R: Read> BitReader<R> {
     pub fn skip_to_byte(&mut self) {
         let to_skip = (8 - self.bit_index % 8) % 8;
         self.bit_index += to_skip;
+    }
+
+    /// Consumes the given number of bits.
+    #[inline(always)]
+    pub fn consume_bits(&mut self, count: usize) {
+        self.bit_index += count;
     }
 
     /// Reads in an aligned `u8`, skipping the remaining of the current byte.
