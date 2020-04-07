@@ -1,15 +1,18 @@
 //! A general-purpose bitwise reader.
 
-use std::io::{Result, Error, ErrorKind, Read};
+// NOTE: Not that general purpose anymore, we started optimizing it for DEFLATE.
 
-// NOTE: This could be useful in some io_utils library.
+use std::io::{Result, Read};
+
+/// The number of bytes the `BitReader` keeps for looking ahead.
+const LOOKAHEAD_SIZE: usize = 4;
 
 /// A bitwise reader for streams that require non-byte aligned reads.
 #[derive(Debug)]
 pub struct BitReader<R: Read> {
     reader: R,
-    current_byte: u8,
-    bit_index: u8,
+    lookahead: [u8; LOOKAHEAD_SIZE],
+    bit_index: usize,
 }
 
 impl <R: Read> BitReader<R> {
@@ -17,16 +20,36 @@ impl <R: Read> BitReader<R> {
     pub fn new(reader: R) -> Self {
         Self{
             reader,
-            current_byte: 0,
-            bit_index: 8,
+            lookahead: [0, 0, 0, 0],
+            bit_index: LOOKAHEAD_SIZE * 8,
         }
     }
 
-    /// Utility for reading the next byte from the underlying reader.
-    fn read_next_byte(&mut self) -> Result<u8> {
-        let mut bs: [u8; 1] = [0];
-        self.reader.read_exact(&mut bs)?;
-        Ok(bs[0])
+    /// Ensures to always have `LOOKAHEAD_SIZE` peeked in the buffer.
+    #[inline(always)]
+    fn ensure_peek(&mut self) -> Result<()> {
+        if self.bit_index < 8 {
+            // We have all the bytes peeked already
+            return Ok(());
+        }
+        // We have at least one byte to read
+        let to_read = self.bit_index / 8;
+        let keep = LOOKAHEAD_SIZE - to_read;
+        // Shift back existing bytes
+        for i in 0..keep {
+            self.lookahead[i] = self.lookahead[i + to_read];
+        }
+        // Read in to the remaining places
+        self.reader.read(&mut self.lookahead[keep..])?;
+        // Wrap cursor
+        self.bit_index %= 8;
+        Ok(())
+    }
+
+    /// Returns the peek buffer as an `u32`.
+    #[inline(always)]
+    fn peek_buffer_as_u32(&mut self) -> u32 {
+        unsafe { std::mem::transmute(self.lookahead) }
     }
 
     /// Reads the next bit from the stream. Either `1` or `0`.
@@ -34,56 +57,58 @@ impl <R: Read> BitReader<R> {
     /// # Errors
     ///
     /// In case of an IO error, an error variant is returned.
+    #[inline(always)]
     pub fn read_bit(&mut self) -> Result<u8> {
-        if self.bit_index == 8 {
-            // Read next byte
-            self.bit_index = 0;
-            self.current_byte = self.read_next_byte()?;
-        }
-        // Get bit
-        let bit = (self.current_byte >> self.bit_index) & 0b1;
+        self.ensure_peek()?;
+        let result = ((self.peek_buffer_as_u32() >> self.bit_index) & 1) as u8;
         self.bit_index += 1;
-        Ok(bit)
+        Ok(result)
     }
 
     /// Reads in multiple bits into an `u8`.
     ///
     /// # Errors
     ///
-    /// In case of an IO error or a `count` greater than `8`, an error variant
-    /// is returned.
+    /// In case of an IO error, an error variant is returned.
+    #[inline(always)]
     pub fn read_to_u8(&mut self, count: usize) -> Result<u8> {
-        if count > 8 {
-            return Err(Error::new(ErrorKind::InvalidInput, "Can't read > 8 bits into an u8!"));
-        }
-        let mut result = 0u8;
-        for i in 0..count {
-            result |= self.read_bit()? << i;
-        }
+        const MASKS: [u32; 9] = [
+            0b00000000,
+            0b00000001, 0b00000011, 0b00000111, 0b00001111,
+            0b00011111, 0b00111111, 0b01111111, 0b11111111,
+        ];
+        self.ensure_peek()?;
+        let result = ((self.peek_buffer_as_u32() >> self.bit_index) & MASKS[count]) as u8;
+        self.bit_index += count;
         Ok(result)
     }
 
-    /// Reads in multiple bits into a `u16`.
+    /// Reads in multiple bits into an `u16`.
     ///
     /// # Errors
     ///
-    /// In case of an IO error or a `count` greater than `16`, an error variant
-    /// is returned.
+    /// In case of an IO error, an error variant is returned.
+    #[inline(always)]
     pub fn read_to_u16(&mut self, count: usize) -> Result<u16> {
-        if count > 16 {
-            return Err(Error::new(ErrorKind::InvalidInput, "Can't read > 16 bits into an u16!"));
-        }
-        let mut result = 0u16;
-        for i in 0..count {
-            result |= (self.read_bit()? as u16) << i;
-        }
+        const MASKS: [u32; 17] = [
+            0b0000000000000000,
+            0b0000000000000001, 0b0000000000000011, 0b0000000000000111, 0b0000000000001111,
+            0b0000000000011111, 0b0000000000111111, 0b0000000001111111, 0b0000000011111111,
+            0b0000000111111111, 0b0000001111111111, 0b0000011111111111, 0b0000111111111111,
+            0b0001111111111111, 0b0011111111111111, 0b0111111111111111, 0b1111111111111111,
+        ];
+        self.ensure_peek()?;
+        let result = ((self.peek_buffer_as_u32() >> self.bit_index) & MASKS[count]) as u16;
+        self.bit_index += count;
         Ok(result)
     }
 
     /// Skips to the start of next byte. If already on a byte-boundlary, this is
     /// a no-op.
+    #[inline(always)]
     pub fn skip_to_byte(&mut self) {
-        self.bit_index = 8;
+        let to_skip = (8 - self.bit_index % 8) % 8;
+        self.bit_index += to_skip;
     }
 
     /// Reads in an aligned `u8`, skipping the remaining of the current byte.
@@ -91,10 +116,17 @@ impl <R: Read> BitReader<R> {
     /// # Errors
     ///
     /// In case of an IO error, an error variant is returned.
+    #[inline(always)]
     pub fn read_aligned_u8(&mut self) -> Result<u8> {
-        let mut b: [u8; 1] = [0];
-        self.read_aligned_to_buffer(&mut b)?;
-        Ok(b[0])
+        self.ensure_peek()?;
+        if self.bit_index == 0 {
+            self.bit_index = 8;
+            Ok(self.lookahead[0])
+        }
+        else {
+            self.bit_index = 16;
+            Ok(self.lookahead[1])
+        }
     }
 
     /// Reads in an aligned `u16`, skipping the remaining of the current byte.
@@ -102,10 +134,17 @@ impl <R: Read> BitReader<R> {
     /// # Errors
     ///
     /// In case of an IO error, an error variant is returned.
+    #[inline(always)]
     pub fn read_aligned_le_u16(&mut self) -> Result<u16> {
-        let mut bs: [u8; 2] = [0, 0];
-        self.read_aligned_to_buffer(&mut bs)?;
-        Ok(u16::from_le_bytes(bs))
+        self.ensure_peek()?;
+        if self.bit_index == 0 {
+            self.bit_index = 16;
+            Ok(u16::from_le_bytes([self.lookahead[0], self.lookahead[1]]))
+        }
+        else {
+            self.bit_index = 24;
+            Ok(u16::from_le_bytes([self.lookahead[1], self.lookahead[2]]))
+        }
     }
 
     /// Reads in the exact amount of aligned bytes into the given buffer,
@@ -114,10 +153,22 @@ impl <R: Read> BitReader<R> {
     /// # Errors
     ///
     /// In case of an IO error or unfilled buffer, an error variant is returned.
+    #[inline(always)]
     pub fn read_aligned_to_buffer(&mut self, buffer: &mut [u8]) -> Result<()> {
         self.skip_to_byte();
-        self.reader.read_exact(buffer)?;
-        Ok(())
+        self.ensure_peek()?;
+        if buffer.len() > LOOKAHEAD_SIZE {
+            // Read LOOKAHEAD_SIZE bytes from the lookahead
+            buffer[..LOOKAHEAD_SIZE].copy_from_slice(&self.lookahead);
+            self.reader.read_exact(&mut buffer[LOOKAHEAD_SIZE..])?;
+            self.bit_index = LOOKAHEAD_SIZE * 8;
+            Ok(())
+        }
+        else {
+            buffer.copy_from_slice(&self.lookahead[..buffer.len()]);
+            self.bit_index = 8 * buffer.len();
+            Ok(())
+        }
     }
 }
 
