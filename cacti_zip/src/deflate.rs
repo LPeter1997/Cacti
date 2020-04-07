@@ -1,9 +1,43 @@
 //! Implementation of the DEFLATE decompression based on RFC 1951.
 
-use std::collections::HashMap;
 use std::io::{Result, Error, ErrorKind, Read};
 use std::mem::MaybeUninit;
+use std::hash::{Hasher, BuildHasherDefault};
 use crate::BitReader;
+
+// HASHER //////////////////////////////////////////////////////////////////////
+
+struct FnvHasher(u64);
+
+impl Default for FnvHasher {
+    fn default() -> FnvHasher {
+        FnvHasher(0xcbf29ce484222325)
+    }
+}
+
+impl Hasher for FnvHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        let FnvHasher(mut hash) = *self;
+
+        for byte in bytes.iter() {
+            hash = hash ^ (*byte as u64);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+
+        *self = FnvHasher(hash);
+    }
+}
+
+type FnvBuildHasher = BuildHasherDefault<FnvHasher>;
+
+//type HashMap<K, V> = std::collections::HashMap<K, V, FnvBuildHasher>;
+type HashMap<K, V> = std::collections::HashMap<K, V>;
+
+////////////////////////////////////////////////////////////////////////////////
 
 /// The number of bytes the DEFLATE algorithm can reference back.
 const WINDOW_LENGTH: usize = 32768;
@@ -87,7 +121,7 @@ impl SlidingWindow {
     /// Copies the back-referenced slice into the buffer and returns the newly
     /// inserted region as a pair of slices.
     fn backreference(&mut self, dist: isize, len: usize) -> (&[u8], &[u8]) {
-        let start_copy = self.buffer_index_of_dist(dist);
+        /*let start_copy = self.buffer_index_of_dist(dist);
         let end_copy = (start_copy + len) % self.buffer.len();
 
         if     self.cursor + len <= self.buffer.len()
@@ -101,7 +135,7 @@ impl SlidingWindow {
             let result_slice = &self.buffer[self.cursor..(self.cursor + len)];
             self.cursor = (self.cursor + len) % self.buffer.len();
             return (result_slice, &self.buffer[0..0]);
-        }
+        }*/
 
         // Fallback
         self.backreference_trivial(dist, len)
@@ -190,7 +224,7 @@ impl <R:  Read> Deflate<R> {
             next_code[bits] = code;
         }
         // Allocate codes
-        let mut result = HashMap::new();
+        let mut result = HashMap::default();
         for n in 0..lens.len() {
             let len = lens[n];
             if len != 0 {
@@ -301,7 +335,7 @@ impl <R:  Read> Deflate<R> {
         let dist_codelens = &all_codelens[n_litlen..];
         let dist = if dist_codelens.len() == 1 && dist_codelens[0] == 0 {
             // Just literals
-            HashMap::new()
+            HashMap::default()
         }
         else {
             let mut one = 0;

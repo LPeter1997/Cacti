@@ -1,5 +1,5 @@
 
-use std::time::SystemTime;
+use std::time::{SystemTime, Duration};
 use std::io::{Read, Write};
 use std::fs;
 use std::env;
@@ -19,12 +19,20 @@ fn main() {
 
     let mut out_buffer = Vec::with_capacity(20 * MEGABYTE);
 
-    let start = SystemTime::now();
-    cacti_zip::decompress(&buffer, &mut out_buffer);
-    let end = SystemTime::now();
+    let mut results = Vec::new();
+    for _ in 0..20 {
+        out_buffer.clear();
+        let start = SystemTime::now();
+        cacti_zip::decompress(&buffer, &mut out_buffer);
+        let end = SystemTime::now();
+        let elapsed = end.duration_since(start).expect("Time went backwards!");
+        results.push(elapsed);
+    }
 
-    let elapsed = end.duration_since(start).expect("Time went backwards!");
-    println!("Took {} millis", elapsed.as_millis());
+    for i in 0..20 {
+        println!("{}", results[i].as_millis());
+    }
+    println!("==========");
 
     let mut out_file = fs::File::create(&args[2]).expect("Could not open target file!");
     out_file.write_all(&out_buffer).expect("Could not write output!");
