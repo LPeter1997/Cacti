@@ -293,7 +293,7 @@ struct HuffmanCode {
 /// LUT optimization for short codes.
 struct HuffmanCodes {
     lut: Box<[HuffmanCode; 1 << HUFFMAN_LUT_BITS]>,
-    dict: HashMap<u16, HuffmanCode>,
+    dict: HashMap<u16, u16>,
 }
 
 impl std::fmt::Debug for HuffmanCodes {
@@ -338,8 +338,9 @@ impl HuffmanCodes {
             }
             else {
                 // Goes into the dictionary
-                // NOTE: Do we need to 1-pad this???
-                result.dict.insert(code, desc);
+                // 1-pad it
+                code |= 1 << desc.length;
+                result.dict.insert(code, desc.symbol);
             }
         });
         result
@@ -361,12 +362,12 @@ impl HuffmanCodes {
         let mut code = bits;
         for i in HUFFMAN_LUT_BITS..DEFLATE_MAX_BITS {
             code = code | ((r.peek_bit(i)? as u16) << i);
-            if let Some(desc) = self.dict.get(&code) {
+            // 1-pad it
+            let real_code = code | (1 << (i + 1));
+            if let Some(symbol) = self.dict.get(&real_code) {
                 // Found it
-                if desc.length == i + 1 {
-                    r.consume_bits(i + 1);
-                    return Ok(desc.symbol);
-                }
+                r.consume_bits(i + 1);
+                return Ok(*symbol);
             }
         }
         // Not found
