@@ -707,16 +707,17 @@ impl <R:  Read> Deflate<R> {
     /// Decodes the repetition length from the literal-length symbol.
     /// RFC 3.2.5.
     fn decode_huffman_length(&mut self, lit_len: u16) -> Result<usize> {
+        const OFFSETS: [usize; 20] = [
+            11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51,
+            59, 67, 83, 99, 115, 131, 163, 195, 227
+        ];
         match lit_len {
             x @ 257..=264 => Ok((x - 257 + 3) as usize),
             x @ 265..=284 => {
-                let x0 = x - 265;
-                let increment = 2 << (x0 / 4);
-                let p2 = (1 << (x0 / 4 + 3)) - 8;
-                let len = (x0 % 4 * increment + p2 + 11) as usize;
-                let extra = (x0 / 4) + 1;
+                let extra = (x - 261) / 4;
+                let offset = OFFSETS[(x - 265) as usize];
                 let extra = self.reader.read_to_u8(extra as usize)? as usize;
-                Ok(len + extra)
+                Ok(offset + extra)
             },
             285 => Ok(258),
             _ => Err(Error::new(ErrorKind::InvalidData, "Invalid length symbol!")),
@@ -726,16 +727,17 @@ impl <R:  Read> Deflate<R> {
     /// Decodes the repetition distance from the distance symbol.
     /// RFC 3.2.5.
     fn decode_huffman_distance(&mut self, sym: u16) -> Result<usize> {
+        const OFFSETS: [usize; 26] = [
+            5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513,
+            769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577
+        ];
         match sym {
             x @ 0..=3 => Ok((x + 1) as usize),
             x @ 4..=29 => {
-                let x0 = x - 4;
-                let increment = 2 << (x0 / 2);
-                let p2 = (1 << (x0 / 2 + 2)) - 4;
-                let len = (x0 % 2 * increment + p2 + 5) as usize;
-                let extra = (x0 / 2) + 1;
+                let extra = (x - 2) / 2;
+                let offset = OFFSETS[(x - 4) as usize];
                 let extra = self.reader.read_to_u16(extra as usize)? as usize;
-                Ok(len + extra)
+                Ok(offset + extra)
             },
             _ => Err(Error::new(ErrorKind::InvalidData, "Invalid distance symbol!")),
         }
