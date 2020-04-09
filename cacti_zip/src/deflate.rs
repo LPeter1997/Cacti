@@ -2,7 +2,45 @@
 
 use std::io::{Result, Error, ErrorKind, Read};
 use std::mem::MaybeUninit;
-use std::collections::HashMap;
+use std::hash::{Hasher, BuildHasherDefault};
+
+// ////////////////////////////////////////////////////////////////////////// //
+//                                  FNV Hash                                  //
+// ////////////////////////////////////////////////////////////////////////// //
+
+// Definitely not stolen.
+
+struct FnvHasher(u64);
+
+impl Default for FnvHasher {
+
+    #[inline]
+    fn default() -> FnvHasher {
+        FnvHasher(0xcbf29ce484222325)
+    }
+}
+
+impl Hasher for FnvHasher {
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        let FnvHasher(mut hash) = *self;
+        for byte in bytes.iter() {
+            hash = hash ^ (*byte as u64);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        *self = FnvHasher(hash);
+    }
+}
+
+/// A builder for default FNV hashers.
+type FnvBuildHasher = BuildHasherDefault<FnvHasher>;
+
+type HashMap<K, V> = std::collections::HashMap<K, V, FnvBuildHasher>;
 
 // ////////////////////////////////////////////////////////////////////////// //
 //                              Bitwise reading                               //
@@ -31,6 +69,7 @@ impl <R: Read> BitReader<R> {
 
     /// Makes sure to have the maximum number of unread elements in the cache
     /// possible.
+    #[inline(always)]
     fn ensure_cache(&mut self) -> Result<()> {
         if self.bit_index < 8 {
             // Cache is full with unread bytes
@@ -51,11 +90,13 @@ impl <R: Read> BitReader<R> {
     }
 
     /// Returns the cache reinterpreted as an `u32`.
+    #[inline(always)]
     fn cache_as_u32(&mut self) -> u32 {
         unsafe { std::mem::transmute(self.cache) }
     }
 
     /// Peeks the bit at the given offset without consuming any of the input.
+    #[inline(always)]
     fn peek_bit(&mut self, offset: usize) -> Result<u8> {
        self.ensure_cache()?;
        let result = ((self.cache_as_u32() >> (self.bit_index + offset)) & 1) as u8;
@@ -63,6 +104,7 @@ impl <R: Read> BitReader<R> {
     }
 
     /// Reads the next bit, consuming it.
+    #[inline(always)]
     fn read_bit(&mut self) -> Result<u8> {
         let result = self.peek_bit(0)?;
         self.bit_index += 1;
@@ -70,6 +112,7 @@ impl <R: Read> BitReader<R> {
     }
 
     /// Peeks bits, returning them in a `u8`.
+    #[inline(always)]
     fn peek_to_u8(&mut self, count: usize) -> Result<u8> {
         const MASKS: [u32; 9] = [
             0b00000000, 0b00000001, 0b00000011, 0b00000111, 0b00001111,
@@ -81,6 +124,7 @@ impl <R: Read> BitReader<R> {
     }
 
     /// Reads bits, returning them in a `u8`.
+    #[inline(always)]
     fn read_to_u8(&mut self, count: usize) -> Result<u8> {
         let result = self.peek_to_u8(count)?;
         self.bit_index += count;
@@ -88,6 +132,7 @@ impl <R: Read> BitReader<R> {
     }
 
     /// Peeks bits, returning them in a `u16`.
+    #[inline(always)]
     fn peek_to_u16(&mut self, count: usize) -> Result<u16> {
         const MASKS: [u32; 17] = [
             0b0000000000000000, 0b0000000000000001, 0b0000000000000011,
@@ -103,6 +148,7 @@ impl <R: Read> BitReader<R> {
     }
 
     /// Reads bits, returning them in a `u16`.
+    #[inline(always)]
     fn read_to_u16(&mut self, count: usize) -> Result<u16> {
         let result = self.peek_to_u16(count)?;
         self.bit_index += count;
@@ -110,16 +156,19 @@ impl <R: Read> BitReader<R> {
     }
 
     /// Consumes the given amount of bits.
+    #[inline(always)]
     fn consume_bits(&mut self, count: usize) {
         self.bit_index += count;
     }
 
     /// Skips to the next byte boundlary.
+    #[inline(always)]
     fn skip_to_byte(&mut self) {
         self.bit_index += (8 - self.bit_index % 8) % 8;
     }
 
     /// Reads a little-endian `u16` aligned to bytes.
+    #[inline(always)]
     fn read_aligned_le_u16(&mut self) -> Result<u16> {
         self.skip_to_byte();
         self.ensure_cache()?;
@@ -129,6 +178,7 @@ impl <R: Read> BitReader<R> {
     }
 
     /// Tries to fill the given buffer to full capacity.
+    #[inline(always)]
     fn read_aligned_to_buffer(&mut self, buffer: &mut [u8]) -> Result<()> {
         self.skip_to_byte();
         self.ensure_cache()?;
@@ -154,20 +204,37 @@ impl <R: Read> BitReader<R> {
 // ////////////////////////////////////////////////////////////////////////// //
 
 /// Reverses the bits of an `u8`.
+#[inline(always)]
 fn reverse_u8_bits(n: u8) -> u8 {
-    const LUT: [u8; 16] = [
-        0x0, 0x8, 0x4, 0xC, 0x2, 0xA, 0x6, 0xE,
-        0x1, 0x9, 0x5, 0xD, 0x3, 0xB, 0x7, 0xF,
+    const LUT: [u8; 256] = [
+        0x00, 0x80, 0x40, 0xc0, 0x20, 0xa0, 0x60, 0xe0, 0x10, 0x90, 0x50, 0xd0,
+        0x30, 0xb0, 0x70, 0xf0, 0x08, 0x88, 0x48, 0xc8, 0x28, 0xa8, 0x68, 0xe8,
+        0x18, 0x98, 0x58, 0xd8, 0x38, 0xb8, 0x78, 0xf8, 0x04, 0x84, 0x44, 0xc4,
+        0x24, 0xa4, 0x64, 0xe4, 0x14, 0x94, 0x54, 0xd4, 0x34, 0xb4, 0x74, 0xf4,
+        0x0c, 0x8c, 0x4c, 0xcc, 0x2c, 0xac, 0x6c, 0xec, 0x1c, 0x9c, 0x5c, 0xdc,
+        0x3c, 0xbc, 0x7c, 0xfc, 0x02, 0x82, 0x42, 0xc2, 0x22, 0xa2, 0x62, 0xe2,
+        0x12, 0x92, 0x52, 0xd2, 0x32, 0xb2, 0x72, 0xf2, 0x0a, 0x8a, 0x4a, 0xca,
+        0x2a, 0xaa, 0x6a, 0xea, 0x1a, 0x9a, 0x5a, 0xda, 0x3a, 0xba, 0x7a, 0xfa,
+        0x06, 0x86, 0x46, 0xc6, 0x26, 0xa6, 0x66, 0xe6, 0x16, 0x96, 0x56, 0xd6,
+        0x36, 0xb6, 0x76, 0xf6, 0x0e, 0x8e, 0x4e, 0xce, 0x2e, 0xae, 0x6e, 0xee,
+        0x1e, 0x9e, 0x5e, 0xde, 0x3e, 0xbe, 0x7e, 0xfe, 0x01, 0x81, 0x41, 0xc1,
+        0x21, 0xa1, 0x61, 0xe1, 0x11, 0x91, 0x51, 0xd1, 0x31, 0xb1, 0x71, 0xf1,
+        0x09, 0x89, 0x49, 0xc9, 0x29, 0xa9, 0x69, 0xe9, 0x19, 0x99, 0x59, 0xd9,
+        0x39, 0xb9, 0x79, 0xf9, 0x05, 0x85, 0x45, 0xc5, 0x25, 0xa5, 0x65, 0xe5,
+        0x15, 0x95, 0x55, 0xd5, 0x35, 0xb5, 0x75, 0xf5, 0x0d, 0x8d, 0x4d, 0xcd,
+        0x2d, 0xad, 0x6d, 0xed, 0x1d, 0x9d, 0x5d, 0xdd, 0x3d, 0xbd, 0x7d, 0xfd,
+        0x03, 0x83, 0x43, 0xc3, 0x23, 0xa3, 0x63, 0xe3, 0x13, 0x93, 0x53, 0xd3,
+        0x33, 0xb3, 0x73, 0xf3, 0x0b, 0x8b, 0x4b, 0xcb, 0x2b, 0xab, 0x6b, 0xeb,
+        0x1b, 0x9b, 0x5b, 0xdb, 0x3b, 0xbb, 0x7b, 0xfb, 0x07, 0x87, 0x47, 0xc7,
+        0x27, 0xa7, 0x67, 0xe7, 0x17, 0x97, 0x57, 0xd7, 0x37, 0xb7, 0x77, 0xf7,
+        0x0f, 0x8f, 0x4f, 0xcf, 0x2f, 0xaf, 0x6f, 0xef, 0x1f, 0x9f, 0x5f, 0xdf,
+        0x3f, 0xbf, 0x7f, 0xff,
     ];
-    // Low 4 bits
-    let lo4 = LUT[(n & 0b1111) as usize];
-    // High 4 bits
-    let hi4 = LUT[(n >> 4) as usize];
-    // Reassemble
-    (lo4 << 4) | hi4
+    LUT[n as usize]
 }
 
 /// Reverses the bits of an `u16`.
+#[inline(always)]
 fn reverse_u16_bits(n: u16) -> u16 {
       ((reverse_u8_bits((n & 0xff) as u8) as u16) << 8)
     | reverse_u8_bits((n >> 8) as u8) as u16
@@ -175,6 +242,7 @@ fn reverse_u16_bits(n: u16) -> u16 {
 
 /// Generates canonical Huffman-codes from the given code-lengths. The codes are
 /// passed to the given callback.
+#[inline(always)]
 fn generate_huffman_from_lengths<F>(code_lens: &[usize], mut f: F)
     where F: FnMut(u16, HuffmanCode) {
     // Count code length occurrences
@@ -246,11 +314,12 @@ impl HuffmanCodes {
         }
         Self {
             lut,
-            dict: HashMap::new(),
+            dict: HashMap::default(),
         }
     }
 
     /// Creates a `HuffmanCodes` structure from the given code-lengths.
+    #[inline(always)]
     fn from_code_lengths(code_lens: &[usize]) -> Self {
         let mut result = Self::new();
         generate_huffman_from_lengths(code_lens, |mut code, desc| {
@@ -265,14 +334,11 @@ impl HuffmanCodes {
                     // Assemble the full bit-stream
                     let index = (i << desc.length) | code;
                     result.lut[index as usize] = desc;
-                    //println!("LUT {:0>width$b} [{}] -> {}", index, desc.length, desc.symbol, width=HUFFMAN_LUT_BITS);
                 }
             }
             else {
                 // Goes into the dictionary
                 // NOTE: Do we need to 1-pad this???
-                //println!("{:0>width$b} -> {}", code, desc.symbol, width=desc.length);
-                //result.dict.insert(code | 0b1000000000000000, desc.symbol);
                 result.dict.insert(code, desc);
             }
         });

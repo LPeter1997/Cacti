@@ -8,5 +8,5 @@ edition = "2018"
 
 [dependencies]
 
-[profile.release]
-debug = true
+#[profile.release]
+#debug = true

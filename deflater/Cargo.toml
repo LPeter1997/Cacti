@@ -9,5 +9,5 @@ edition = "2018"
 [dependencies]
 cacti_zip = { path="../cacti_zip" }
 
-[profile.release]
-debug = true
+#[profile.release]
+#debug = true
