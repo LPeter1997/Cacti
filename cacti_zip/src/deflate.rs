@@ -13,7 +13,6 @@ use std::hash::{Hasher, BuildHasherDefault};
 struct FnvHasher(u64);
 
 impl Default for FnvHasher {
-
     #[inline]
     fn default() -> FnvHasher {
         FnvHasher(0xcbf29ce484222325)
@@ -70,8 +69,8 @@ impl <R: Read> BitReader<R> {
     /// Makes sure to have the maximum number of unread elements in the cache
     /// possible.
     #[inline(always)]
-    fn ensure_cache(&mut self) -> Result<()> {
-        if self.bit_index < 8 {
+    fn ensure_cache(&mut self, minbits: usize) -> Result<()> {
+        if self.bit_index < minbits {
             // Cache is full with unread bytes
             return Ok(());
         }
@@ -98,7 +97,7 @@ impl <R: Read> BitReader<R> {
     /// Peeks the bit at the given offset without consuming any of the input.
     #[inline(always)]
     fn peek_bit(&mut self, offset: usize) -> Result<u8> {
-       self.ensure_cache()?;
+       self.ensure_cache(32)?;
        let result = ((self.cache_as_u32() >> (self.bit_index + offset)) & 1) as u8;
        Ok(result)
     }
@@ -118,7 +117,7 @@ impl <R: Read> BitReader<R> {
             0b00000000, 0b00000001, 0b00000011, 0b00000111, 0b00001111,
             0b00011111, 0b00111111, 0b01111111, 0b11111111,
         ];
-        self.ensure_cache()?;
+        self.ensure_cache(24)?;
         let result = ((self.cache_as_u32() >> self.bit_index) & MASKS[count]) as u8;
         Ok(result)
     }
@@ -142,7 +141,7 @@ impl <R: Read> BitReader<R> {
             0b0000111111111111, 0b0001111111111111, 0b0011111111111111,
             0b0111111111111111, 0b1111111111111111,
         ];
-        self.ensure_cache()?;
+        self.ensure_cache(16)?;
         let result = ((self.cache_as_u32() >> self.bit_index) & MASKS[count]) as u16;
         Ok(result)
     }
@@ -171,7 +170,7 @@ impl <R: Read> BitReader<R> {
     #[inline(always)]
     fn read_aligned_le_u16(&mut self) -> Result<u16> {
         self.skip_to_byte();
-        self.ensure_cache()?;
+        self.ensure_cache(8)?;
         let result = u16::from_le_bytes([self.cache[0], self.cache[1]]);
         self.bit_index += 16;
         Ok(result)
@@ -181,7 +180,7 @@ impl <R: Read> BitReader<R> {
     #[inline(always)]
     fn read_aligned_to_buffer(&mut self, buffer: &mut [u8]) -> Result<()> {
         self.skip_to_byte();
-        self.ensure_cache()?;
+        self.ensure_cache(8)?;
         if buffer.len() <= BIT_READER_CACHE_SIZE {
             // No extra reads
             buffer.copy_from_slice(&self.cache[..buffer.len()]);
