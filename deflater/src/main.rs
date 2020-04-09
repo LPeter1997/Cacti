@@ -7,6 +7,8 @@ use std::env;
 const KILOBYTE: usize = 1024;
 const MEGABYTE: usize = KILOBYTE * 1024;
 
+const REPEAT: usize = 20;
+
 fn main() {
     let args: Vec<_> = env::args().collect();
     if args.len() != 3 {
@@ -20,7 +22,7 @@ fn main() {
     let mut out_buffer = Vec::with_capacity(20 * MEGABYTE);
 
     let mut results = Vec::new();
-    for _ in 0..20 {
+    for _ in 0..REPEAT {
         out_buffer.clear();
         let start = SystemTime::now();
         cacti_zip::decompress(&buffer, &mut out_buffer);
@@ -29,7 +31,7 @@ fn main() {
         results.push(elapsed);
     }
 
-    for i in 0..20 {
+    for i in 0..REPEAT {
         println!("{}", results[i].as_millis());
     }
     println!("==========");

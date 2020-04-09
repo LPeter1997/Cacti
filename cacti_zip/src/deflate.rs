@@ -2,52 +2,323 @@
 
 use std::io::{Result, Error, ErrorKind, Read};
 use std::mem::MaybeUninit;
-use std::hash::{Hasher, BuildHasherDefault};
-use crate::BitReader;
+use std::collections::HashMap;
 
-// HASHER //////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////// //
+//                              Bitwise reading                               //
+// ////////////////////////////////////////////////////////////////////////// //
 
-struct FnvHasher(u64);
+/// The number of bytes the `BitReader` keeps in the cache.
+const BIT_READER_CACHE_SIZE: usize = 4;
 
-impl Default for FnvHasher {
-    fn default() -> FnvHasher {
-        FnvHasher(0xcbf29ce484222325)
-    }
+/// A bitwise adapter for readers for processing data on non-byte boundlaries.
+#[derive(Debug)]
+struct BitReader<R: Read> {
+    reader: R,
+    cache: [u8; BIT_READER_CACHE_SIZE],
+    bit_index: usize,
 }
 
-impl Hasher for FnvHasher {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-
-    fn write(&mut self, bytes: &[u8]) {
-        let FnvHasher(mut hash) = *self;
-
-        for byte in bytes.iter() {
-            hash = hash ^ (*byte as u64);
-            hash = hash.wrapping_mul(0x100000001b3);
+impl <R: Read> BitReader<R> {
+    /// Creates a new `BitReader` from the given reader.
+    fn new(reader: R) -> Self {
+        Self {
+            reader,
+            cache: [0u8; BIT_READER_CACHE_SIZE],
+            bit_index: BIT_READER_CACHE_SIZE * 8,
         }
+    }
 
-        *self = FnvHasher(hash);
+    /// Makes sure to have the maximum number of unread elements in the cache
+    /// possible.
+    fn ensure_cache(&mut self) -> Result<()> {
+        if self.bit_index < 8 {
+            // Cache is full with unread bytes
+            return Ok(());
+        }
+        // We can throw away some bytes, also need to read as many
+        let can_read = self.bit_index / 8;
+        let keep = BIT_READER_CACHE_SIZE - can_read;
+        // Shift back the elements we keep
+        for i in 0..keep {
+            self.cache[i] = self.cache[i + can_read];
+        }
+        // Make sure our bit-index now points into the first byte
+        self.bit_index %= 8;
+        // Read into the extra space
+        self.reader.read(&mut self.cache[keep..])?;
+        Ok(())
+    }
+
+    /// Returns the cache reinterpreted as an `u32`.
+    fn cache_as_u32(&mut self) -> u32 {
+        unsafe { std::mem::transmute(self.cache) }
+    }
+
+    /// Peeks the bit at the given offset without consuming any of the input.
+    fn peek_bit(&mut self, offset: usize) -> Result<u8> {
+       self.ensure_cache()?;
+       let result = ((self.cache_as_u32() >> (self.bit_index + offset)) & 1) as u8;
+       Ok(result)
+    }
+
+    /// Reads the next bit, consuming it.
+    fn read_bit(&mut self) -> Result<u8> {
+        let result = self.peek_bit(0)?;
+        self.bit_index += 1;
+        Ok(result)
+    }
+
+    /// Peeks bits, returning them in a `u8`.
+    fn peek_to_u8(&mut self, count: usize) -> Result<u8> {
+        const MASKS: [u32; 9] = [
+            0b00000000, 0b00000001, 0b00000011, 0b00000111, 0b00001111,
+            0b00011111, 0b00111111, 0b01111111, 0b11111111,
+        ];
+        self.ensure_cache()?;
+        let result = ((self.cache_as_u32() >> self.bit_index) & MASKS[count]) as u8;
+        Ok(result)
+    }
+
+    /// Reads bits, returning them in a `u8`.
+    fn read_to_u8(&mut self, count: usize) -> Result<u8> {
+        let result = self.peek_to_u8(count)?;
+        self.bit_index += count;
+        Ok(result)
+    }
+
+    /// Peeks bits, returning them in a `u16`.
+    fn peek_to_u16(&mut self, count: usize) -> Result<u16> {
+        const MASKS: [u32; 17] = [
+            0b0000000000000000, 0b0000000000000001, 0b0000000000000011,
+            0b0000000000000111, 0b0000000000001111, 0b0000000000011111,
+            0b0000000000111111, 0b0000000001111111, 0b0000000011111111,
+            0b0000000111111111, 0b0000001111111111, 0b0000011111111111,
+            0b0000111111111111, 0b0001111111111111, 0b0011111111111111,
+            0b0111111111111111, 0b1111111111111111,
+        ];
+        self.ensure_cache()?;
+        let result = ((self.cache_as_u32() >> self.bit_index) & MASKS[count]) as u16;
+        Ok(result)
+    }
+
+    /// Reads bits, returning them in a `u16`.
+    fn read_to_u16(&mut self, count: usize) -> Result<u16> {
+        let result = self.peek_to_u16(count)?;
+        self.bit_index += count;
+        Ok(result)
+    }
+
+    /// Consumes the given amount of bits.
+    fn consume_bits(&mut self, count: usize) {
+        self.bit_index += count;
+    }
+
+    /// Skips to the next byte boundlary.
+    fn skip_to_byte(&mut self) {
+        self.bit_index += (8 - self.bit_index % 8) % 8;
+    }
+
+    /// Reads a little-endian `u16` aligned to bytes.
+    fn read_aligned_le_u16(&mut self) -> Result<u16> {
+        self.skip_to_byte();
+        self.ensure_cache()?;
+        let result = u16::from_le_bytes([self.cache[0], self.cache[1]]);
+        self.bit_index += 16;
+        Ok(result)
+    }
+
+    /// Tries to fill the given buffer to full capacity.
+    fn read_aligned_to_buffer(&mut self, buffer: &mut [u8]) -> Result<()> {
+        self.skip_to_byte();
+        self.ensure_cache()?;
+        if buffer.len() <= BIT_READER_CACHE_SIZE {
+            // No extra reads
+            buffer.copy_from_slice(&self.cache[..buffer.len()]);
+            self.bit_index += buffer.len() * 8;
+            Ok(())
+        }
+        else {
+            // Full cache invalidation, extra reads
+            buffer[..BIT_READER_CACHE_SIZE].copy_from_slice(&self.cache);
+            // Extra read
+            self.reader.read_exact(&mut buffer[BIT_READER_CACHE_SIZE..])?;
+            self.bit_index = BIT_READER_CACHE_SIZE * 8;
+            Ok(())
+        }
     }
 }
 
-type FnvBuildHasher = BuildHasherDefault<FnvHasher>;
+// ////////////////////////////////////////////////////////////////////////// //
+//                               Huffman codes                                //
+// ////////////////////////////////////////////////////////////////////////// //
 
-//type HashMap<K, V> = std::collections::HashMap<K, V, FnvBuildHasher>;
-type HashMap<K, V> = std::collections::HashMap<K, V>;
+/// Reverses the bits of an `u8`.
+fn reverse_u8_bits(n: u8) -> u8 {
+    const LUT: [u8; 16] = [
+        0x0, 0x8, 0x4, 0xC, 0x2, 0xA, 0x6, 0xE,
+        0x1, 0x9, 0x5, 0xD, 0x3, 0xB, 0x7, 0xF,
+    ];
+    // Low 4 bits
+    let lo4 = LUT[(n & 0b1111) as usize];
+    // High 4 bits
+    let hi4 = LUT[(n >> 4) as usize];
+    // Reassemble
+    (lo4 << 4) | hi4
+}
 
-////////////////////////////////////////////////////////////////////////////////
+/// Reverses the bits of an `u16`.
+fn reverse_u16_bits(n: u16) -> u16 {
+      ((reverse_u8_bits((n & 0xff) as u8) as u16) << 8)
+    | reverse_u8_bits((n >> 8) as u8) as u16
+}
 
-/// The number of bytes the DEFLATE algorithm can reference back.
-const WINDOW_LENGTH: usize = 32768;
-/// The maximum number of bits the DEFLATE algorithm accepts as a Huffman-code.
-const MAX_CODE_BITS: usize = 15;
+/// Generates canonical Huffman-codes from the given code-lengths. The codes are
+/// passed to the given callback.
+fn generate_huffman_from_lengths<F>(code_lens: &[usize], mut f: F)
+    where F: FnMut(u16, HuffmanCode) {
+    // Count code length occurrences
+    let mut bl_count = [0u16; 16];
+    for len in code_lens {
+        bl_count[*len] += 1;
+    }
+    // Determine base value for each code length
+    let mut next_code = [0u16; 16];
+    let mut code = 0u16;
+    bl_count[0] = 0;
+    for bits in 1..=DEFLATE_MAX_BITS {
+        code = (code + bl_count[bits - 1]) << 1;
+        next_code[bits] = code;
+    }
+    // Assign each symbol a unique code based on the base values
+    for symbol in 0..code_lens.len() {
+        let length = code_lens[symbol];
+        if length != 0 {
+            // Allocate a new code for it
+            let code = next_code[length];
+            let desc = HuffmanCode{ symbol: symbol as u16, length };
+            f(code, desc);
+            next_code[length] += 1;
+        }
+    }
+}
+
+/// The maximum number of bits a Huffman-code allows for LUT optimizations.
+const HUFFMAN_LUT_BITS: usize = 10;
+/// The symbol value that's considered an invalid entry.
+const HUFFMAN_INVALID_SYMBOL: u16 = 999;
+
+// NOTE: Instead of invalid symbols the LUT could somehow aid the search for the
+// given symbol. This is possible because a subset of codes must start with the
+// searched bits.
+
+// NOTE: We don't need `usize` for code-lengths, an `u8` is enough.
+
+/// Represents a single Huffman-code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct HuffmanCode {
+    symbol: u16,
+    length: usize,
+}
+
+/// Represents a helper-structure for canonical Huffman-codes that implements
+/// LUT optimization for short codes.
+struct HuffmanCodes {
+    lut: Box<[HuffmanCode; 1 << HUFFMAN_LUT_BITS]>,
+    dict: HashMap<u16, HuffmanCode>,
+}
+
+impl std::fmt::Debug for HuffmanCodes {
+    fn fmt(&self, _f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        // TODO
+        unimplemented!();
+    }
+}
+
+impl HuffmanCodes {
+    /// Creates a new, empty `HuffmanCodes` structure.
+    fn new() -> Self {
+        let mut lut: Box<[HuffmanCode; 1 << HUFFMAN_LUT_BITS]> =
+            Box::new(unsafe { MaybeUninit::uninit().assume_init() });
+        for entry in lut.iter_mut() {
+            entry.symbol = HUFFMAN_INVALID_SYMBOL;
+            entry.length = 0;
+        }
+        Self {
+            lut,
+            dict: HashMap::new(),
+        }
+    }
+
+    /// Creates a `HuffmanCodes` structure from the given code-lengths.
+    fn from_code_lengths(code_lens: &[usize]) -> Self {
+        let mut result = Self::new();
+        generate_huffman_from_lengths(code_lens, |mut code, desc| {
+            // We reverse each code as the function generates them in the spec order
+            code = reverse_u16_bits(code) >> (16 - desc.length);
+            if desc.length <= HUFFMAN_LUT_BITS {
+                // We LUT optimize it
+                // We need to generate all bit-combinations that fit behind this
+                // code
+                let gen_bits = HUFFMAN_LUT_BITS - desc.length;
+                for i in 0..(1 << gen_bits) {
+                    // Assemble the full bit-stream
+                    let index = (i << desc.length) | code;
+                    result.lut[index as usize] = desc;
+                    //println!("LUT {:0>width$b} [{}] -> {}", index, desc.length, desc.symbol, width=HUFFMAN_LUT_BITS);
+                }
+            }
+            else {
+                // Goes into the dictionary
+                // NOTE: Do we need to 1-pad this???
+                //println!("{:0>width$b} -> {}", code, desc.symbol, width=desc.length);
+                //result.dict.insert(code | 0b1000000000000000, desc.symbol);
+                result.dict.insert(code, desc);
+            }
+        });
+        result
+    }
+
+    /// Decodes a Huffman-code from the given `BitReader`.
+    fn decode_symbol<R: Read>(&self, r: &mut BitReader<R>) -> Result<u16> {
+        // First we try the LUT-way
+        let bits = r.peek_to_u16(HUFFMAN_LUT_BITS)?;
+        let desc = &self.lut[bits as usize];
+        if desc.symbol != HUFFMAN_INVALID_SYMBOL {
+            // Found it
+            r.consume_bits(desc.length);
+            return Ok(desc.symbol);
+        }
+        // Not found, try in the dictionary
+        //unimplemented!();
+        //let mut code = bits | 0b1000000000000000;
+        let mut code = bits;
+        for i in HUFFMAN_LUT_BITS..DEFLATE_MAX_BITS {
+            code = code | ((r.peek_bit(i)? as u16) << i);
+            if let Some(desc) = self.dict.get(&code) {
+                // Found it
+                if desc.length == i + 1 {
+                    r.consume_bits(i + 1);
+                    return Ok(desc.symbol);
+                }
+            }
+        }
+        // Not found
+        return Err(Error::new(ErrorKind::InvalidData, "No such code!"));
+    }
+}
+
+// ////////////////////////////////////////////////////////////////////////// //
+//                               Sliding window                               //
+// ////////////////////////////////////////////////////////////////////////// //
+
+/// The maximum number of bytes the DEFLATE algorithm can reference back.
+const DEFLATE_WINDOW_SIZE: usize = 32768;
 
 /// A fixed-size sliding window implementation using a circular buffer. This is
 /// to store the last 32 KiB for backreferences.
 struct SlidingWindow {
-    buffer: Box<[u8; WINDOW_LENGTH]>,
+    buffer: Box<[u8; DEFLATE_WINDOW_SIZE]>,
     cursor: usize,
 }
 
@@ -142,6 +413,13 @@ impl SlidingWindow {
     }
 }
 
+// ////////////////////////////////////////////////////////////////////////// //
+//                           Deflate implementation                           //
+// ////////////////////////////////////////////////////////////////////////// //
+
+/// The maximum number of bits the DEFLATE spec allows a code-length to be.
+const DEFLATE_MAX_BITS: usize = 15;
+
 /// State for a non-compressed DEFLATE block.
 #[derive(Debug)]
 struct NonCompressed {
@@ -164,9 +442,9 @@ struct Backref {
 #[derive(Debug)]
 struct Huffman {
     /// The literal and length code dictionary.
-    lit_len: HashMap<u16, u16>,
+    lit_len: HuffmanCodes,
     /// The distance-code dictionary.
-    dist: HashMap<u16, u16>,
+    dist: HuffmanCodes,
     /// The currently processed backreference.
     backref: Option<Backref>,
 }
@@ -199,43 +477,6 @@ impl <R:  Read> Deflate<R> {
         }
     }
 
-    /// Generates canonic Huffman-codes from code lengths that are all
-    /// left-padded with a `1`, so we don't have to store code-lengths for
-    /// leading `0`s.
-    /// Taken from RFC 1951, 3.2.2.
-    fn generate_huffman(lens: &[usize]) -> Result<HashMap<u16, u16>> {
-        // Find the max length
-        let max_bits = lens.iter().cloned().max().unwrap_or(0);
-        if max_bits > MAX_CODE_BITS {
-            return Err(Error::new(ErrorKind::InvalidInput, "Invalid code length!"));
-        }
-        // Count the number of codes for each code length
-        let mut bl_count = [0u16; MAX_CODE_BITS + 1];
-        for l in lens {
-            bl_count[*l] += 1;
-        }
-        // Find the numerical value of the smallest code for each code length
-        let mut next_code = vec![0u16; MAX_CODE_BITS + 1];
-        let mut code = 0u16;
-        // Setting to 1 instead of 0 to make the extra padding bit on the left
-        bl_count[0] = 1;
-        for bits in 1..=max_bits {
-            code = (code + bl_count[bits - 1]) << 1;
-            next_code[bits] = code;
-        }
-        // Allocate codes
-        let mut result = HashMap::default();
-        for n in 0..lens.len() {
-            let len = lens[n];
-            if len != 0 {
-                let code = next_code[len];
-                result.insert(code, n as u16);
-                next_code[len] += 1;
-            }
-        }
-        Ok(result)
-    }
-
     // Header reading //////////////////////////////////////////////////////////
 
     /// Reads in a non-compressed block header, returning the `NonCompressed`
@@ -260,10 +501,10 @@ impl <R:  Read> Deflate<R> {
         for i in 144..=255 { litlen_lens[i] = 9; }
         for i in 256..=279 { litlen_lens[i] = 7; }
         for i in 280..=287 { litlen_lens[i] = 8; }
-        let lit_len = Self::generate_huffman(&litlen_lens)?;
+        let lit_len = HuffmanCodes::from_code_lengths(&litlen_lens);
         // Distance codes
         let dist_lens = [5usize; 32];
-        let dist = Self::generate_huffman(&dist_lens)?;
+        let dist = HuffmanCodes::from_code_lengths(&dist_lens);
         Ok(Huffman{
             lit_len,
             dist,
@@ -293,17 +534,17 @@ impl <R:  Read> Deflate<R> {
         }
 
         // Construct the code-length code
-        let codelen_code = Self::generate_huffman(&codelen_codelens)?;
+        let codelen_code = HuffmanCodes::from_code_lengths(&codelen_codelens);
 
         // We decode all code-lengths in one go, as their processing is the same
         // NOTE: We could just have an array here
         let mut all_codelens = vec![0usize; n_litlen + n_dist];
         let mut codelen_idx = 0;
         while codelen_idx < all_codelens.len() {
-            let sym = self.decode_huffman_symbol(&codelen_code)? as usize;
+            let sym = codelen_code.decode_symbol(&mut self.reader)?;
             if sym < 16 {
                 // Simple length
-                all_codelens[codelen_idx] = sym;
+                all_codelens[codelen_idx] = sym as usize;
                 codelen_idx += 1;
                 continue;
             }
@@ -329,13 +570,13 @@ impl <R:  Read> Deflate<R> {
 
         // Construct lit-len codes
         let litlen_codelens = &all_codelens[0..n_litlen];
-        let lit_len = Self::generate_huffman(litlen_codelens)?;
+        let lit_len = HuffmanCodes::from_code_lengths(litlen_codelens);
 
         // Construct distance codes, but also check RFC stuff
         let dist_codelens = &all_codelens[n_litlen..];
         let dist = if dist_codelens.len() == 1 && dist_codelens[0] == 0 {
             // Just literals
-            HashMap::default()
+            HuffmanCodes::new()
         }
         else {
             let mut one = 0;
@@ -354,10 +595,10 @@ impl <R:  Read> Deflate<R> {
                 let mut dist_codelens = dist_codelens.to_vec();
                 dist_codelens.resize(32, 0);
                 dist_codelens[31] = 1;
-                Self::generate_huffman(&dist_codelens)?
+                HuffmanCodes::from_code_lengths(&dist_codelens)
             }
             else {
-                Self::generate_huffman(dist_codelens)?
+                HuffmanCodes::from_code_lengths(dist_codelens)
             }
         };
 
@@ -396,18 +637,6 @@ impl <R:  Read> Deflate<R> {
     }
 
     // Decoding Huffman-encoded blocks /////////////////////////////////////////
-
-    /// Decodes a Huffman symbol from the given dictionary.
-    fn decode_huffman_symbol(&mut self, dict: &HashMap<u16, u16>) -> Result<u16> {
-        let mut code = 1u16;
-        for _ in 0..MAX_CODE_BITS {
-            code = (code << 1) | self.reader.read_bit()? as u16;
-            if let Some(sym) = dict.get(&code) {
-                return Ok(*sym);
-            }
-        }
-        Err(Error::new(ErrorKind::InvalidData, "Invalid symbol code!"))
-    }
 
     /// Decodes the repetition length from the literal-length symbol.
     /// RFC 3.2.5.
@@ -479,7 +708,7 @@ impl <R:  Read> Deflate<R> {
                 continue;
             }
             // We need to read a symbol
-            let sym = self.decode_huffman_symbol(&state.lit_len)?;
+            let sym = state.lit_len.decode_symbol(&mut self.reader)?;
             // Check if end of block
             if sym == 256 {
                 return Ok((filled, true));
@@ -497,7 +726,7 @@ impl <R:  Read> Deflate<R> {
             // their dict. are unified
             let length = self.decode_huffman_length(sym)?;
             // Get distance symbol
-            let dist_sym = self.decode_huffman_symbol(&state.dist)?;
+            let dist_sym = state.dist.decode_symbol(&mut self.reader)?;
             // Decode the the distance symbol
             let distance = -(self.decode_huffman_distance(dist_sym)? as isize);
             // Add it to the state

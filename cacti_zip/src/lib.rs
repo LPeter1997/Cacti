@@ -1,7 +1,4 @@
 
-mod bit_reader;
-use bit_reader::BitReader;
-
 mod deflate;
 use deflate::Deflate;
 
