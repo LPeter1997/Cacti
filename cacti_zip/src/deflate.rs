@@ -46,7 +46,7 @@ type HashMap<K, V> = std::collections::HashMap<K, V, FnvBuildHasher>;
 // ////////////////////////////////////////////////////////////////////////// //
 
 /// The number of bytes the `BitReader` keeps in the cache.
-const BIT_READER_CACHE_SIZE: usize = 4;
+const BIT_READER_CACHE_SIZE: usize = 8;
 
 /// A bitwise adapter for readers for processing data on non-byte boundlaries.
 #[derive(Debug)]
@@ -90,15 +90,15 @@ impl <R: Read> BitReader<R> {
 
     /// Returns the cache reinterpreted as an `u32`.
     #[inline(always)]
-    fn cache_as_u32(&mut self) -> u32 {
+    fn cache_as_u64(&mut self) -> u64 {
         unsafe { std::mem::transmute(self.cache) }
     }
 
     /// Peeks the bit at the given offset without consuming any of the input.
     #[inline(always)]
     fn peek_bit(&mut self, offset: usize) -> Result<u8> {
-       self.ensure_cache(32)?;
-       let result = ((self.cache_as_u32() >> (self.bit_index + offset)) & 1) as u8;
+       self.ensure_cache(64)?;
+       let result = ((self.cache_as_u64() >> (self.bit_index + offset)) & 1) as u8;
        Ok(result)
     }
 
@@ -113,12 +113,12 @@ impl <R: Read> BitReader<R> {
     /// Peeks bits, returning them in a `u8`.
     #[inline(always)]
     fn peek_to_u8(&mut self, count: usize) -> Result<u8> {
-        const MASKS: [u32; 9] = [
+        const MASKS: [u64; 9] = [
             0b00000000, 0b00000001, 0b00000011, 0b00000111, 0b00001111,
             0b00011111, 0b00111111, 0b01111111, 0b11111111,
         ];
-        self.ensure_cache(24)?;
-        let result = ((self.cache_as_u32() >> self.bit_index) & MASKS[count]) as u8;
+        self.ensure_cache(56)?;
+        let result = ((self.cache_as_u64() >> self.bit_index) & MASKS[count]) as u8;
         Ok(result)
     }
 
@@ -133,7 +133,7 @@ impl <R: Read> BitReader<R> {
     /// Peeks bits, returning them in a `u16`.
     #[inline(always)]
     fn peek_to_u16(&mut self, count: usize) -> Result<u16> {
-        const MASKS: [u32; 17] = [
+        const MASKS: [u64; 17] = [
             0b0000000000000000, 0b0000000000000001, 0b0000000000000011,
             0b0000000000000111, 0b0000000000001111, 0b0000000000011111,
             0b0000000000111111, 0b0000000001111111, 0b0000000011111111,
@@ -141,8 +141,8 @@ impl <R: Read> BitReader<R> {
             0b0000111111111111, 0b0001111111111111, 0b0011111111111111,
             0b0111111111111111, 0b1111111111111111,
         ];
-        self.ensure_cache(16)?;
-        let result = ((self.cache_as_u32() >> self.bit_index) & MASKS[count]) as u16;
+        self.ensure_cache(48)?;
+        let result = ((self.cache_as_u64() >> self.bit_index) & MASKS[count]) as u16;
         Ok(result)
     }
 
