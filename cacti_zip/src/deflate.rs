@@ -13,19 +13,19 @@ use std::hash::{Hasher, BuildHasherDefault};
 struct FnvHasher(u64);
 
 impl Default for FnvHasher {
-    #[inline]
+    #[inline(always)]
     fn default() -> FnvHasher {
         FnvHasher(0xcbf29ce484222325)
     }
 }
 
 impl Hasher for FnvHasher {
-    #[inline]
+    #[inline(always)]
     fn finish(&self) -> u64 {
         self.0
     }
 
-    #[inline]
+    #[inline(always)]
     fn write(&mut self, bytes: &[u8]) {
         let FnvHasher(mut hash) = *self;
         for byte in bytes.iter() {
@@ -346,6 +346,7 @@ impl HuffmanCodes {
     }
 
     /// Decodes a Huffman-code from the given `BitReader`.
+    #[inline(always)]
     fn decode_symbol<R: Read>(&self, r: &mut BitReader<R>) -> Result<u16> {
         const ONE_PADS: [u16; 15] = [
             0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x400,
