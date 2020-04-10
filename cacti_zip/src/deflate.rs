@@ -420,9 +420,19 @@ impl SlidingWindow {
     /// Adds a slice to the `SlidingWindow`.
     #[inline(always)]
     fn push_slice(&mut self, elements: &[u8]) {
-        // TODO: Definitely optimize this
-        for e in elements {
-            self.push(*e);
+        let copy_end = self.cursor + elements.len();
+        if copy_end <= self.buffer.len() {
+            // Trivial forward-copy
+            self.buffer[self.cursor..copy_end].copy_from_slice(elements);
+            self.cursor = copy_end;
+        }
+        else {
+            // Copy in 2 pieces
+            let part1_len = self.buffer.len() - self.cursor;
+            let cursor_end = copy_end % self.buffer.len();
+            self.buffer[self.cursor..].copy_from_slice(&elements[..part1_len]);
+            self.buffer[..cursor_end].copy_from_slice(&elements[part1_len..]);
+            self.cursor = cursor_end;
         }
     }
 
