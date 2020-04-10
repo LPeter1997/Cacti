@@ -466,17 +466,30 @@ impl SlidingWindow {
         let start_copy = self.buffer_index_of_dist(dist);
         let end_copy = (start_copy + len) % self.buffer.len();
 
-        if     self.cursor + len <= self.buffer.len()
-            && start_copy <= end_copy
-            && (start_copy >= self.cursor + len || end_copy < self.cursor) {
+        let cursor_nowrap = self.cursor + len <= self.buffer.len();
+        let src_no_wrap = start_copy <= end_copy;
 
-            // Trivial memcopy
-            let src = self.buffer[start_copy..].as_ptr();
-            let dst = self.buffer[self.cursor..].as_mut_ptr();
-            unsafe { std::ptr::copy_nonoverlapping(src, dst, len) };
-            let result_slice = &self.buffer[self.cursor..(self.cursor + len)];
-            self.cursor = (self.cursor + len) % self.buffer.len();
-            return (result_slice, &self.buffer[0..0]);
+        if cursor_nowrap && src_no_wrap {
+            let no_overlap = start_copy >= self.cursor + len || end_copy < self.cursor;
+
+            if no_overlap {
+                // Trivial memcopy
+                let src = self.buffer[start_copy..].as_ptr();
+                let dst = self.buffer[self.cursor..].as_mut_ptr();
+                unsafe { std::ptr::copy_nonoverlapping(src, dst, len) };
+                let result_slice = &self.buffer[self.cursor..(self.cursor + len)];
+                self.cursor = (self.cursor + len) % self.buffer.len();
+                return (result_slice, &self.buffer[0..0]);
+            }
+            else {
+                // We don't need to wrap-check stuff
+                for i in 0..len {
+                    self.buffer[self.cursor + i] = self.buffer[start_copy + i];
+                }
+                let result_slice = &self.buffer[self.cursor..(self.cursor + len)];
+                self.cursor = (self.cursor + len) % self.buffer.len();
+                return (result_slice, &self.buffer[0..0]);
+            }
         }
 
         // Fallback
