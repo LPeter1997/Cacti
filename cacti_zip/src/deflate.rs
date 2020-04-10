@@ -347,6 +347,10 @@ impl HuffmanCodes {
 
     /// Decodes a Huffman-code from the given `BitReader`.
     fn decode_symbol<R: Read>(&self, r: &mut BitReader<R>) -> Result<u16> {
+        const ONE_PADS: [u16; 15] = [
+            0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x400,
+            0x800, 0x1000, 0x2000, 0x4000, 0x8000
+        ];
         // First we try the LUT-way
         let bits = r.peek_to_u16(HUFFMAN_LUT_BITS)?;
         let desc = &self.lut[bits as usize];
@@ -356,13 +360,11 @@ impl HuffmanCodes {
             return Ok(desc.symbol);
         }
         // Not found, try in the dictionary
-        //unimplemented!();
-        //let mut code = bits | 0b1000000000000000;
         let mut code = bits;
         for i in HUFFMAN_LUT_BITS..DEFLATE_MAX_BITS {
             code = code | ((r.peek_bit(i)? as u16) << i);
             // 1-pad it
-            let real_code = code | (1 << (i + 1));
+            let real_code = code | ONE_PADS[i];
             if let Some(symbol) = self.dict.get(&real_code) {
                 // Found it
                 r.consume_bits(i + 1);
@@ -458,7 +460,7 @@ impl SlidingWindow {
     /// Copies the back-referenced slice into the buffer and returns the newly
     /// inserted region as a pair of slices.
     fn backreference(&mut self, dist: isize, len: usize) -> (&[u8], &[u8]) {
-        /*let start_copy = self.buffer_index_of_dist(dist);
+        let start_copy = self.buffer_index_of_dist(dist);
         let end_copy = (start_copy + len) % self.buffer.len();
 
         if     self.cursor + len <= self.buffer.len()
@@ -472,7 +474,7 @@ impl SlidingWindow {
             let result_slice = &self.buffer[self.cursor..(self.cursor + len)];
             self.cursor = (self.cursor + len) % self.buffer.len();
             return (result_slice, &self.buffer[0..0]);
-        }*/
+        }
 
         // Fallback
         self.backreference_trivial(dist, len)
