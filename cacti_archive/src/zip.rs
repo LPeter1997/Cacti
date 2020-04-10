@@ -453,12 +453,11 @@ impl TryFrom<u16> for Compression {
 impl Compression {
     /// Creates a decompressor for this compression algorithm with the given
     /// reader and given compressed length.
-    fn create_decompressor<R: Read>(&self, reader: R, compressed_size: usize) -> Box<dyn Read>
-        where R: 'static {
+    fn create_decompressor<R: Read>(&self, reader: R, compressed_size: usize) -> ZipFileDecompressor<R> {
         let reader = reader.take(compressed_size as u64);
         match self {
-            Self::NoCompression => Box::new(reader),
-            Self::Deflate => Box::new(Inflate::new(reader)),
+            Self::NoCompression => ZipFileDecompressor::NoCompression(reader)        ,
+            Self::Deflate       => ZipFileDecompressor::Deflate(Inflate::new(reader)),
         }
     }
 }
@@ -479,8 +478,9 @@ fn parse_central_directory<R: Read + Seek>(r: &mut ByteReader<R>) -> io::Result<
 }
 
 /// Represents a zipped archive.
+#[derive(Debug)]
 pub struct ZipArchive<R: Read + Seek> {
-    reader: ByteReader<R>,
+    reader : ByteReader<R>  ,
     entries: Vec<FileHeader>,
 }
 
@@ -491,27 +491,36 @@ impl <R: Read + Seek> ZipArchive<R> {
         let entries = parse_central_directory(&mut reader)?;
         Ok(Self{ reader, entries })
     }
+
+    /// Returns the number of `ZipFile` entries this archive holds.
+    pub fn entry_count(&self) -> usize { self.entries.len() }
+
+    /// Returns the `ZipFile` descriptor for the given entry index.
+    pub fn entry_at_index<'a>(&'a mut self, index: usize) -> io::Result<ZipFile<'a, R>> {
+        ZipFile::new(&mut self.reader, &self.entries[index])
+    }
 }
 
 /// Represents a single file or directory inside a `ZipArchive`.
+#[derive(Debug)]
 pub struct ZipFile<'a, R: Read + Seek> {
-    archive          : &'a mut ZipArchive<R>,
-    name             : &'a str              ,
-    is_encrypted     : bool                 ,
-    is_file          : bool                 ,
-    last_modified    : SystemTime           ,
-    compression      : Compression          ,
-    data_offset      : usize                ,
-    compressed_size  : usize                ,
-    uncompressed_size: usize                ,
-    crc32            : u32                  ,
+    reader           : &'a mut R  ,
+    name             : &'a str    ,
+    is_encrypted     : bool       ,
+    is_file          : bool       ,
+    last_modified    : SystemTime ,
+    compression      : Compression,
+    data_offset      : usize      ,
+    compressed_size  : usize      ,
+    uncompressed_size: usize      ,
+    crc32            : u32        ,
 }
 
 // TODO: CRC32 checks
 
 impl <'a, R: Read + Seek> ZipFile<'a, R> {
-    /// Creates the `ZipFile` from the given `ZipArchive` and `FileHeader`.
-    fn new(archive: &'a mut ZipArchive<R>, header: &'a FileHeader) -> io::Result<Self> {
+    /// Creates the `ZipFile` from the given reader and `FileHeader`.
+    fn new(reader: &'a mut ByteReader<R>, header: &'a FileHeader) -> io::Result<Self> {
         // File name
         let mut name = header.file_name.as_str();
         if header.is_dir() {
@@ -519,12 +528,12 @@ impl <'a, R: Read + Seek> ZipFile<'a, R> {
             name = &name[..(name.len() - 1)];
         }
         // Data offset
-        archive.reader.set_offset(header.local_header_offset as usize)?;
-        let _local_header = LocalFileHeader::parse_noreset(&mut archive.reader)?;
-        let data_offset = archive.reader.offset();
+        reader.set_offset(header.local_header_offset as usize)?;
+        let _local_header = LocalFileHeader::parse_noreset(reader)?;
+        let data_offset = reader.offset();
         // Done
         Ok(Self {
-            archive,
+            reader: reader.reader_ref(),
             name,
             is_encrypted: header.is_flag(0),
             is_file: header.is_file(),
@@ -556,13 +565,28 @@ impl <'a, R: Read + Seek> ZipFile<'a, R> {
 
     /// Returns the decompressor for this file. Use `uncompressed_size` as a
     /// length to  pre-allocate a buffer for the optimal allocation size.
-    pub fn decompressor(&self) -> io::Result<Box<dyn Read>> {
+    pub fn decompressor(&'a mut self) -> io::Result<impl Read + 'a> {
         if self.is_encrypted {
             return Err(io::Error::new(io::ErrorKind::Other, "Encryption is not supported!"));
         }
-        self.archive.reader.set_offset(self.data_offset);
-        let reader = self.archive.reader.reader_ref();
-        Ok(self.compression.create_decompressor(reader, self.compressed_size))
+        self.reader.seek(io::SeekFrom::Start(self.data_offset as u64))?;
+        Ok(self.compression.create_decompressor(&mut self.reader, self.compressed_size))
+    }
+}
+
+/// Represents a `ZipFile` decompressor.
+#[derive(Debug)]
+enum ZipFileDecompressor<R: Read> {
+    NoCompression(io::Take<R>),
+    Deflate(Inflate<io::Take<R>>),
+}
+
+impl <R: Read> io::Read for ZipFileDecompressor<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::NoCompression(r) => r.read(buf),
+            Self::Deflate(r)       => r.read(buf),
+        }
     }
 }
 
