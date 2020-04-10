@@ -3,6 +3,9 @@
 
 use std::io::{Read, Seek, SeekFrom};
 use std::io;
+use std::time::{SystemTime, Duration};
+use std::convert::{TryFrom, TryInto};
+use crate::deflate::Inflate;
 
 /// The internal reader.
 #[derive(Debug)]
@@ -428,6 +431,38 @@ impl Parse for LocalFileHeader {
     }
 }
 
+/// The enumeration of supported compression algorithms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Compression {
+    NoCompression,
+    Deflate,
+}
+
+impl TryFrom<u16> for Compression {
+    type Error = io::Error;
+
+    fn try_from(n: u16) -> io::Result<Self> {
+        match n {
+            0 => Ok(Self::NoCompression),
+            8 => Ok(Self::Deflate),
+            _ => Err(io::Error::new(io::ErrorKind::Other, "Unsupported compression!")),
+        }
+    }
+}
+
+impl Compression {
+    /// Creates a decompressor for this compression algorithm with the given
+    /// reader and given compressed length.
+    fn create_decompressor<R: Read>(&self, reader: R, compressed_size: usize) -> Box<dyn Read>
+        where R: 'static {
+        let reader = reader.take(compressed_size as u64);
+        match self {
+            Self::NoCompression => Box::new(reader),
+            Self::Deflate => Box::new(Inflate::new(reader)),
+        }
+    }
+}
+
 /// Parses a Zip archive's central directory into `FileHeader` records.
 fn parse_central_directory<R: Read + Seek>(r: &mut ByteReader<R>) -> io::Result<Vec<FileHeader>> {
     // First we have to find the end of the central directory
@@ -456,6 +491,87 @@ impl <R: Read + Seek> ZipArchive<R> {
         let entries = parse_central_directory(&mut reader)?;
         Ok(Self{ reader, entries })
     }
+}
+
+/// Represents a single file or directory inside a `ZipArchive`.
+pub struct ZipFile<'a, R: Read + Seek> {
+    archive          : &'a mut ZipArchive<R>,
+    name             : &'a str              ,
+    is_encrypted     : bool                 ,
+    is_file          : bool                 ,
+    last_modified    : SystemTime           ,
+    compression      : Compression          ,
+    data_offset      : usize                ,
+    compressed_size  : usize                ,
+    uncompressed_size: usize                ,
+    crc32            : u32                  ,
+}
+
+// TODO: CRC32 checks
+
+impl <'a, R: Read + Seek> ZipFile<'a, R> {
+    /// Creates the `ZipFile` from the given `ZipArchive` and `FileHeader`.
+    fn new(archive: &'a mut ZipArchive<R>, header: &'a FileHeader) -> io::Result<Self> {
+        // File name
+        let mut name = header.file_name.as_str();
+        if header.is_dir() {
+            // We remove the '/'
+            name = &name[..(name.len() - 1)];
+        }
+        // Data offset
+        archive.reader.set_offset(header.local_header_offset as usize)?;
+        let _local_header = LocalFileHeader::parse_noreset(&mut archive.reader)?;
+        let data_offset = archive.reader.offset();
+        // Done
+        Ok(Self {
+            archive,
+            name,
+            is_encrypted: header.is_flag(0),
+            is_file: header.is_file(),
+            last_modified: decode_ms_dos_datetime(header.mod_date, header.mod_time),
+            compression: header.compression.try_into()?,
+            data_offset,
+            compressed_size: header.compressed_size,
+            uncompressed_size: header.uncompressed_size,
+            crc32: header.crc32,
+        })
+    }
+
+    /// Returns the full path and name of this file or directory.
+    pub fn name(&self) -> &str { &self.name }
+
+    /// Returns `true`, if this entry is a file.
+    pub fn is_file(&self) -> bool { self.is_file }
+    /// Returns `true`, if this entry is a directory.
+    pub fn is_dir(&self) -> bool { !self.is_file }
+
+    /// Returns the stored modification time.
+    pub fn modification_time(&self) -> SystemTime { self.last_modified }
+
+    /// Returns the byte-size of the file this represents, when compressed.
+    pub fn compressed_size(&self) -> usize { self.compressed_size }
+    /// Returns the byte-size of the file this represents, when uncompressed.
+    /// This can be used to pre-allocate a buffer for decompression.
+    pub fn uncompressed_size(&self) -> usize { self.uncompressed_size }
+
+    /// Returns the decompressor for this file. Use `uncompressed_size` as a
+    /// length to  pre-allocate a buffer for the optimal allocation size.
+    pub fn decompressor(&self) -> io::Result<Box<dyn Read>> {
+        if self.is_encrypted {
+            return Err(io::Error::new(io::ErrorKind::Other, "Encryption is not supported!"));
+        }
+        self.archive.reader.set_offset(self.data_offset);
+        let reader = self.archive.reader.reader_ref();
+        Ok(self.compression.create_decompressor(reader, self.compressed_size))
+    }
+}
+
+/// Translates the MS-DOS date-time format to `SystemTime`.
+fn decode_ms_dos_datetime(date: u16, time: u16) -> SystemTime {
+    let dos_epoch = SystemTime::UNIX_EPOCH + Duration::from_secs(315532800);
+    let date_offs = Duration::from_secs(24 * 60 * 60 * (date as u64));
+    let time_offs = Duration::from_secs((time as u64) * 2);
+    dos_epoch + date_offs + time_offs
 }
 
 /// Decodes an UTF8 String.
