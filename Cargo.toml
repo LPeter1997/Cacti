@@ -3,5 +3,5 @@
 members = [
     "cacti_fs",
     "cacti_archive",
-    "deflater",
+    "cacti_asset",
 ]
