@@ -372,7 +372,7 @@ impl HuffmanCodes {
             }
         }
         // Not found
-        return Err(Error::new(ErrorKind::InvalidData, "No such code!"));
+        Err(Error::new(ErrorKind::InvalidData, "No such code!"))
     }
 }
 
@@ -458,6 +458,41 @@ impl SlidingWindow {
         }
     }
 
+    /// Copies the back-referenced slice using memcpy. This assumes no overlaps
+    /// or wraps happen.
+    #[inline(always)]
+    fn backreference_memcopy(&mut self, start: usize, len: usize) -> (&[u8], &[u8]) {
+        // Trivial memcopy
+        let src = self.buffer[start..].as_ptr();
+        let dst = self.buffer[self.cursor..].as_mut_ptr();
+        unsafe { std::ptr::copy_nonoverlapping(src, dst, len) };
+        let result_slice = &self.buffer[self.cursor..(self.cursor + len)];
+        self.cursor = (self.cursor + len) % self.buffer.len();
+        (result_slice, &self.buffer[0..0])
+    }
+
+    /// Copies the back-referenced slice with a left-to-right bytewise copy.
+    /// This assumes no wraps happen.
+    #[inline(always)]
+    fn backreference_bytecopy(&mut self, start: usize, len: usize) -> (&[u8], &[u8]) {
+        for i in 0..len {
+            self.buffer[self.cursor + i] = self.buffer[start + i];
+        }
+        let result_slice = &self.buffer[self.cursor..(self.cursor + len)];
+        self.cursor = (self.cursor + len) % self.buffer.len();
+        (result_slice, &self.buffer[0..0])
+    }
+
+    /// Does backreference by memset-ting a single byte.
+    #[inline(always)]
+    fn backreference_memset(&mut self, byte: u8, len: usize) -> (&[u8], &[u8]) {
+        let dst = self.buffer[self.cursor..].as_mut_ptr();
+        unsafe { std::ptr::write_bytes(dst, byte, len) };
+        let result_slice = &self.buffer[self.cursor..(self.cursor + len)];
+        self.cursor = (self.cursor + len) % self.buffer.len();
+        (result_slice, &self.buffer[0..0])
+    }
+
     // NOTE: This could be optimized further for some cases but it's not that
     // trivial to do so.
     /// Copies the back-referenced slice into the buffer and returns the newly
@@ -471,25 +506,22 @@ impl SlidingWindow {
 
         if cursor_nowrap && src_no_wrap {
             let no_overlap = start_copy >= self.cursor + len || end_copy < self.cursor;
-
             if no_overlap {
                 // Trivial memcopy
-                let src = self.buffer[start_copy..].as_ptr();
-                let dst = self.buffer[self.cursor..].as_mut_ptr();
-                unsafe { std::ptr::copy_nonoverlapping(src, dst, len) };
-                let result_slice = &self.buffer[self.cursor..(self.cursor + len)];
-                self.cursor = (self.cursor + len) % self.buffer.len();
-                return (result_slice, &self.buffer[0..0]);
+                return self.backreference_memcopy(start_copy, len);
             }
-            else {
-                // We don't need to wrap-check stuff
-                for i in 0..len {
-                    self.buffer[self.cursor + i] = self.buffer[start_copy + i];
+            // At least we don't need to wrap-check stuff
+            let forward_copy = !(start_copy > self.cursor);
+            if forward_copy {
+                let overlap = self.cursor - start_copy;
+                if overlap == 1 {
+                    // Byte-wise memset
+                    let byte = self.buffer[start_copy];
+                    return self.backreference_memset(byte, len);
                 }
-                let result_slice = &self.buffer[self.cursor..(self.cursor + len)];
-                self.cursor = (self.cursor + len) % self.buffer.len();
-                return (result_slice, &self.buffer[0..0]);
             }
+
+            return self.backreference_bytecopy(start_copy, len);
         }
 
         // Fallback
