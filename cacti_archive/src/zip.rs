@@ -1,3 +1,5 @@
+//! Zip archive handling.
+// TODO: doc
 
 use std::io::{Read, Seek, SeekFrom};
 use std::io;

@@ -1,4 +1,5 @@
 //! Implementation of the DEFLATE format based on RFC 1951.
+// TODO: doc
 
 use std::io::{Result, Error, ErrorKind, Read};
 use std::mem::MaybeUninit;
