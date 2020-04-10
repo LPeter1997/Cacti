@@ -2,6 +2,6 @@
 
 members = [
     "cacti_fs",
-    "cacti_zip",
+    "cacti_archive",
     "deflater",
 ]

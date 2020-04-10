@@ -1,5 +1,5 @@
 
-use std::time::{SystemTime, Duration};
+use std::time::SystemTime;
 use std::io::{Read, Write};
 use std::fs;
 use std::env;
@@ -24,8 +24,9 @@ fn main() {
     let mut results = Vec::new();
     for _ in 0..REPEAT {
         out_buffer.clear();
+        let mut infl = cacti_archive::Inflate::new(buffer.as_slice());
         let start = SystemTime::now();
-        cacti_zip::decompress(&buffer, &mut out_buffer);
+        infl.read_to_end(&mut out_buffer).expect("Could not decompress!");
         let end = SystemTime::now();
         let elapsed = end.duration_since(start).expect("Time went backwards!");
         results.push(elapsed);

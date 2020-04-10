@@ -1,5 +1,5 @@
 [package]
-name = "cacti_zip"
+name = "cacti_archive"
 version = "0.1.0"
 authors = ["Peter Lenkefi <lenkefi.peti@gmail.com>"]
 edition = "2018"

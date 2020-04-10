@@ -1,14 +1,6 @@
 
-mod deflate;
-use deflate::Deflate;
-
 use std::io::{Read, Seek, SeekFrom};
 use std::io;
-
-pub fn decompress(bytes: &[u8], target: &mut Vec<u8>) {
-    let mut defl = Deflate::new(bytes);
-    defl.read_to_end(target).expect("Could not decompress!");
-}
 
 /// The internal reader.
 #[derive(Debug)]

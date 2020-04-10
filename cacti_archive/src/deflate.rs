@@ -1,14 +1,16 @@
-//! Implementation of the DEFLATE decompression based on RFC 1951.
+//! Implementation of the DEFLATE format based on RFC 1951.
 
 use std::io::{Result, Error, ErrorKind, Read};
 use std::mem::MaybeUninit;
 use std::hash::{Hasher, BuildHasherDefault};
+use std::fmt;
 
 // ////////////////////////////////////////////////////////////////////////// //
 //                                  FNV Hash                                  //
 // ////////////////////////////////////////////////////////////////////////// //
 
-// Definitely not stolen.
+// Reference:
+// https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function#FNV-1a_hash
 
 struct FnvHasher(u64);
 
@@ -27,18 +29,16 @@ impl Hasher for FnvHasher {
 
     #[inline(always)]
     fn write(&mut self, bytes: &[u8]) {
-        let FnvHasher(mut hash) = *self;
-        for byte in bytes.iter() {
+        let mut hash = self.0;
+        for byte in bytes {
             hash = hash ^ (*byte as u64);
             hash = hash.wrapping_mul(0x100000001b3);
         }
-        *self = FnvHasher(hash);
+        self.0 = hash;
     }
 }
 
-/// A builder for default FNV hashers.
 type FnvBuildHasher = BuildHasherDefault<FnvHasher>;
-
 type HashMap<K, V> = std::collections::HashMap<K, V, FnvBuildHasher>;
 
 // ////////////////////////////////////////////////////////////////////////// //
@@ -295,10 +295,12 @@ struct HuffmanCodes {
     dict: HashMap<u16, u16>,
 }
 
-impl std::fmt::Debug for HuffmanCodes {
-    fn fmt(&self, _f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        // TODO
-        unimplemented!();
+impl fmt::Debug for HuffmanCodes {
+    fn fmt(&self, f: &mut fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("HuffmanCodes")
+            // TODO: lut field
+            // TODO: dict field
+            .finish()
     }
 }
 
@@ -392,9 +394,11 @@ struct SlidingWindow {
 }
 
 impl std::fmt::Debug for SlidingWindow {
-    fn fmt(&self, _f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        // TODO
-        unimplemented!();
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("SlidingWindow")
+            // TODO: buffer field
+            // TODO: cursor field
+            .finish()
     }
 }
 
@@ -590,15 +594,15 @@ enum DeflateBlock {
 
 /// A type for implementing the DEFLATE decompression algorithm.
 #[derive(Debug)]
-pub struct Deflate<R: Read> {
+pub struct Inflate<R: Read> {
     reader: BitReader<R>,
     is_last_block: bool,
     current_block: Option<DeflateBlock>,
     window: SlidingWindow,
 }
 
-impl <R:  Read> Deflate<R> {
-    /// Creates a new `Deflate` structure from the given `Read` type.
+impl <R:  Read> Inflate<R> {
+    /// Creates a new `Inflate` structure from the given reader.
     pub fn new(reader: R) -> Self {
         Self{
             reader: BitReader::new(reader),
@@ -870,7 +874,7 @@ impl <R:  Read> Deflate<R> {
     }
 }
 
-impl <R: Read> Read for Deflate<R> {
+impl <R: Read> Read for Inflate<R> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         let mut filled = 0;
         loop {
@@ -909,5 +913,5 @@ impl <R: Read> Read for Deflate<R> {
 mod tests {
     use super::*;
 
-    // TODO: Test both SlidingWindow and Deflate
+    // TODO: Test both SlidingWindow and Inflate
 }
