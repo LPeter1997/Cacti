@@ -569,6 +569,7 @@ struct Backref {
     distance: isize,
 }
 
+// NOTE: We could store codes in the `Deflate` structure to avoid reallocation.
 /// State for a Huffman-encoded DEFLATE block.
 #[derive(Debug)]
 struct Huffman {
@@ -622,6 +623,7 @@ impl <R:  Read> Deflate<R> {
         Ok(NonCompressed{ size: len as usize, copied: 0 })
     }
 
+    // NOTE: We could pre-generate this.
     /// Reads in a fixed Huffman-encoded header, returning the `Huffman`
     /// descriptor for it.
     /// RFC 3.2.6.
