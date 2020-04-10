@@ -407,6 +407,7 @@ impl SlidingWindow {
     }
 
     /// Adds an element to the `SlidingWindow`.
+    #[inline(always)]
     fn push(&mut self, element: u8) {
         self.buffer[self.cursor] = element;
         // Slide
@@ -429,6 +430,7 @@ impl SlidingWindow {
     }
 
     /// Returns the element the given distance away from the cursor.
+    #[inline(always)]
     fn peek(&self, dist: isize) -> u8 {
         let idx = self.buffer_index_of_dist(dist);
         self.buffer[idx]
@@ -439,6 +441,7 @@ impl SlidingWindow {
     ///
     /// This implementation only goes for correctness, no optimizations are
     /// performed.
+    #[inline(always)]
     fn backreference_trivial(&mut self, dist: isize, len: usize) -> (&[u8], &[u8]) {
         let start = self.cursor;
         for _ in 0..len {
