@@ -418,7 +418,9 @@ impl SlidingWindow {
     // NOTE: This could be optimized for some cases but it's not that trivial to
     // do so.
     /// Adds a slice to the `SlidingWindow`.
+    #[inline(always)]
     fn push_slice(&mut self, elements: &[u8]) {
+        // TODO: Definitely optimize this
         for e in elements {
             self.push(*e);
         }
@@ -426,6 +428,7 @@ impl SlidingWindow {
 
     /// Returns the buffer index corresponding to the given dostance from the
     /// cursor.
+    #[inline(always)]
     fn buffer_index_of_dist(&self, dist: isize) -> usize {
         ((self.cursor as isize + dist) as usize) % self.buffer.len()
     }
@@ -498,6 +501,7 @@ impl SlidingWindow {
     // trivial to do so.
     /// Copies the back-referenced slice into the buffer and returns the newly
     /// inserted region as a pair of slices.
+    #[inline(always)]
     fn backreference(&mut self, dist: isize, len: usize) -> (&[u8], &[u8]) {
         let start_copy = self.buffer_index_of_dist(dist);
         let end_copy = (start_copy + len) % self.buffer.len();
