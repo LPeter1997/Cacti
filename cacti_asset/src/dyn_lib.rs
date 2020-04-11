@@ -72,6 +72,32 @@ trait DynLib: Sized {
     fn load_symbol(&mut self, name: &str) -> Result<Self::Symbol>;
 }
 
+// Unsupported implementation //////////////////////////////////////////////////
+
+mod unsupported {
+    #![allow(dead_code)]
+
+    use std::io::{Error, ErrorKind};
+    use super::*;
+
+    #[derive(Debug)]
+    pub struct UnsupportedDynLib;
+
+    #[derive(Debug)]
+    pub struct UnsupportedSymbol;
+
+    impl DynLib for UnsupportedDynLib {
+        type Symbol = UnsupportedSymbol;
+
+        fn load(_path: &Path) -> Result<Self> {
+            Err(Error::new(ErrorKind::Other, "Library loading is not supported on this platform!"))
+        }
+
+        fn unload(&mut self) { unreachable!() }
+        fn load_symbol(&mut self, _name: &str) -> Result<Self::Symbol> { unreachable!() }
+    }
+}
+
 // WinAPI implementation ///////////////////////////////////////////////////////
 
 #[cfg(target_os = "windows")]
@@ -146,10 +172,26 @@ mod win32 {
 // Choosing the right implementation based on platform.
 
 #[cfg(target_os = "windows")] type DynLibImpl = win32::WinApiDynLib;
+#[cfg(not(any(
+    target_os = "windows",
+)))] type DynLibImpl = unsupported::UnsupportedDynLib;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // TODO
+    #[test]
+    fn test_win32_nonexisting() {
+        let l = Library::load("nonexisting");
+        assert!(l.is_err());
+    }
+
+    #[test]
+    fn test_win32_kernel32() -> Result<()> {
+        let mut l = Library::load("kernel32")?;
+        let sym: Symbol<extern "system" fn(u32) -> u32> = l.load_symbol("GetProcessVersion")?;
+        let v = sym(0);
+        assert_ne!(0, v);
+        Ok(())
+    }
 }
