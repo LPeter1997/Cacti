@@ -177,6 +177,7 @@ mod unix {
     use std::os::raw::c_char;
     use std::os::unix::ffi::OsStrExt;
     use std::io;
+    use std::ptr;
     use super::*;
 
     const RTLD_NOW: i32 = 0x2;
@@ -205,7 +206,7 @@ mod unix {
         type Symbol = UnixSymbol;
 
         fn load(path: &Path) -> Result<Self> {
-            let name = CString::new(path.as_os_str().as_bytes());
+            let name = unsafe{ CString::from_vec_unchecked(path.as_os_str().as_bytes().to_vec()) };
             let handle = unsafe{ dlopen(name.as_ptr(), RTLD_NOW) };
             if handle.is_null() {
                 return Err(get_dlerror());
@@ -222,7 +223,7 @@ mod unix {
         }
 
         fn load_symbol(&mut self, name: &str) -> Result<Self::Symbol> {
-            let name = unsafe{ CString::from_vec_unchecked(name) };
+            let name = unsafe{ CString::from_vec_unchecked(name.to_vec()) };
             let sym = unsafe{ dlsym(self.0, name.as_ptr()) };
             if sym.is_null() {
                 return Err(get_dlerror());
