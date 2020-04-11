@@ -197,7 +197,7 @@ mod unix {
     pub struct UnixSymbol(*const c_void);
 
     fn get_dlerror() -> io::Error {
-        let err = dlerror();
+        let err = unsafe{ dlerror() };
         let err_str = unsafe{ CString::from_raw(err) }.into_string()
             .unwrap_or_else(|_| "Unknown dlerror".into());
         io::Error::new(io::ErrorKind::Other, err_str)
