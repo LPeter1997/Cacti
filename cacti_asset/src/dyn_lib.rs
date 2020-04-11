@@ -198,7 +198,8 @@ mod unix {
 
     fn get_dlerror() -> io::Error {
         let err = dlerror();
-        let err_str = unsafe{ CString::from_raw(err) };
+        let err_str = unsafe{ CString::from_raw(err) }.into_string()
+            .unwrap_or_else(|_| "Unknown dlerror".into());
         io::Error::new(io::ErrorKind::Other, err_str)
     }
 
@@ -223,7 +224,7 @@ mod unix {
         }
 
         fn load_symbol(&mut self, name: &str) -> Result<Self::Symbol> {
-            let name = unsafe{ CString::from_vec_unchecked(name.to_vec()) };
+            let name = unsafe{ CString::from_vec_unchecked(name.as_bytes().to_vec()) };
             let sym = unsafe{ dlsym(self.0, name.as_ptr()) };
             if sym.is_null() {
                 return Err(get_dlerror());
