@@ -169,11 +169,80 @@ mod win32 {
     }
 }
 
+// Unix implementation /////////////////////////////////////////////////////////
+
+#[cfg(target_family = "unix")]
+mod unix {
+    use std::ffi::{CString, c_void};
+    use std::os::raw::c_char;
+    use std::os::unix::ffi::OsStrExt;
+    use std::io;
+    use super::*;
+
+    const RTLD_NOW: i32 = 0x2;
+
+    #[link(name = "c")]
+    extern "C" {
+        fn dlopen(fname: *const c_char, flag: i32) -> *mut c_void;
+        fn dlerror() -> *mut c_char;
+        fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+        fn dlclose(handle: *mut c_void) -> i32;
+    }
+
+    #[derive(Debug)]
+    pub struct UnixDynLib(*mut c_void);
+
+    #[derive(Debug)]
+    pub struct UnixSymbol(*const c_void);
+
+    fn get_dlerror() -> io::Error {
+        let err = dlerror();
+        let err_str = unsafe{ CString::from_raw(err) };
+        io::Error::new(io::ErrorKind::Other, err_str)
+    }
+
+    impl DynLib for UnixDynLib {
+        type Symbol = UnixSymbol;
+
+        fn load(path: &Path) -> Result<Self> {
+            let name = CString::new(path.as_os_str().as_bytes());
+            let handle = unsafe{ dlopen(name.as_ptr(), RTLD_NOW) };
+            if handle.is_null() {
+                return Err(get_dlerror());
+            }
+            Ok(Self(handle))
+        }
+
+        fn unload(&mut self) {
+            if self.0.is_null() {
+                return;
+            }
+            unsafe{ dlclose(self.0) };
+            self.0 = ptr::null_mut();
+        }
+
+        fn load_symbol(&mut self, name: &str) -> Result<Self::Symbol> {
+            let name = unsafe{ CString::from_vec_unchecked(name) };
+            let sym = unsafe{ dlsym(self.0, name.as_ptr()) };
+            if sym.is_null() {
+                return Err(get_dlerror());
+            }
+            Ok(UnixSymbol(sym))
+        }
+    }
+
+    impl UnixSymbol {
+        pub fn ptr_ref(&self) -> &*const c_void { &self.0 }
+    }
+}
+
 // Choosing the right implementation based on platform.
 
 #[cfg(target_os = "windows")] type DynLibImpl = win32::WinApiDynLib;
+#[cfg(target_family = "unix")] type DynLibImpl = unix::UnixDynLib;
 #[cfg(not(any(
     target_os = "windows",
+    target_family = "unix",
 )))] type DynLibImpl = unsupported::UnsupportedDynLib;
 
 #[cfg(test)]
