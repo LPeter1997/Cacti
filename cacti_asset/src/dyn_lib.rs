@@ -10,12 +10,48 @@
 
 use std::io::Result;
 use std::path::Path;
+use std::marker::PhantomData;
+use std::ops::Deref;
 
 // ////////////////////////////////////////////////////////////////////////// //
 //                                    API                                     //
 // ////////////////////////////////////////////////////////////////////////// //
 
-// TODO
+// TODO: doc
+
+pub struct Library(DynLibImpl);
+
+impl Library {
+    pub fn load(path: impl AsRef<Path>) -> Result<Self> {
+        Ok(Self(DynLibImpl::load(path.as_ref())?))
+    }
+
+    pub fn load_symbol<T>(&mut self, name: &str) -> Result<Symbol<T>> {
+        Ok(Symbol{
+            sym: self.0.load_symbol(name)?,
+            phantom: PhantomData,
+        })
+    }
+}
+
+impl Drop for Library {
+    fn drop(&mut self) {
+        self.0.unload();
+    }
+}
+
+pub struct Symbol<'a, T: 'a> {
+    sym: <DynLibImpl as DynLib>::Symbol,
+    phantom: PhantomData<&'a T>,
+}
+
+impl <'a, T: 'a> Deref for Symbol<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe{ std::mem::transmute(self.sym.ptr_ref()) }
+    }
+}
 
 // ////////////////////////////////////////////////////////////////////////// //
 //                               Implementation                               //
@@ -58,7 +94,7 @@ mod win32 {
         fn GetProcAddress(
             hmodule: *mut c_void  ,
             name   : *const c_char,
-        ) -> *const c_void;
+        ) -> *mut c_void;
     }
 
     /// Converts the Rust &OsStr into a WinAPI `WCHAR` string.
@@ -103,7 +139,7 @@ mod win32 {
     }
 
     impl WinApiSymbol {
-        pub fn as_ptr(&self) -> *const c_void { self.0 }
+        pub fn ptr_ref(&self) -> &*const c_void { &self.0 }
     }
 }
 
