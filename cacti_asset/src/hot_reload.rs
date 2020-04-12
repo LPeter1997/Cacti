@@ -33,7 +33,7 @@ pub struct Host<API> {
 impl <API> Host<API> {
     /// Creates a new host from the provided API and path for the client
     /// library.
-    pub fn new(mut api: API, path: impl AsRef<Path>) -> io::Result<Self> {
+    pub fn new(api: API, path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref();
         let mut library = Library::load(path)?;
         let mtime = mtime(path)?;
@@ -51,7 +51,7 @@ impl <API> Host<API> {
 
     /// Updates the client and returns the status returned by the client's
     /// update method.
-    fn update(&mut self) -> io::Result<Loop> {
+    pub fn update(&mut self) -> io::Result<Loop> {
         let api = (&mut self.api as *mut API).cast();
         if self.state.is_none() {
             // We need to create the state
