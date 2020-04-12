@@ -3,6 +3,8 @@
 
 use std::path::{Path, PathBuf};
 use std::io;
+use std::fs;
+use std::ptr;
 use std::time::SystemTime;
 use crate::dyn_lib::*;
 
@@ -13,7 +15,7 @@ use crate::dyn_lib::*;
 /// The type responsible for managing the dinamically loaded part of the
 /// application. This type should be held in the part that won't be
 /// live-reloaded.
-pub struct Host {
+pub struct Host<API> {
     /// Path to the client library.
     path   : PathBuf,
     /// The loaded client library.
@@ -22,6 +24,29 @@ pub struct Host {
     mtime  : SystemTime,
     /// The loaded symbol from the client library.
     client : ClientApi,
+    /// The state of the client.
+    state  : Vec<u8>,
+    /// The API type the host provides from it's side.
+    api    : API,
+}
+
+impl <API> Host<API> {
+    pub fn new(mut api: API, path: impl AsRef<Path>) -> io::Result<Self> {
+        let path = path.as_ref();
+        let mut library = Library::load(path)?;
+        let mtime = mtime(path)?;
+        let client = load_symbol(&mut library)?;
+        let mut state = vec![0u8; client.state_size as usize];
+        (client.new_state)(state.as_mut_ptr(), (&mut api as *mut API).cast());
+        Ok(Self{
+            path: path.to_path_buf(),
+            library,
+            mtime,
+            client,
+            state,
+            api,
+        })
+    }
 }
 
 /// This is the trait that the live-reloaded state type should implement. These
@@ -64,7 +89,18 @@ pub enum Loop {
 //                               Implementation                               //
 // ////////////////////////////////////////////////////////////////////////// //
 
+fn mtime(path: &Path) -> io::Result<SystemTime> {
+    fs::metadata(path)
+        .and_then(|m| m.modified().or_else(|_| m.created()))
+}
+
+fn load_symbol(library: &mut Library) -> io::Result<ClientApi> {
+    let sym: Symbol<*const ClientApi> = library.load_symbol("CLIENT_API")?;
+    Ok(unsafe{ ptr::read(*sym) })
+}
+
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct ClientApi {
     state_size   : u64,
     new_state    : fn(*mut u8, *mut u8),
