@@ -252,12 +252,14 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(target_os = "windows")]
     fn test_win32_nonexisting() {
         let l = Library::load("nonexisting");
         assert!(l.is_err());
     }
 
     #[test]
+    #[cfg(target_os = "windows")]
     fn test_win32_kernel32() -> Result<()> {
         let mut l = Library::load("kernel32")?;
         let sym: Symbol<extern "system" fn(u32) -> u32> = l.load_symbol("GetProcessVersion")?;
