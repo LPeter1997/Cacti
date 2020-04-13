@@ -12,7 +12,7 @@ use crate::dyn_lib::*;
 //                                    API                                     //
 // ////////////////////////////////////////////////////////////////////////// //
 
-/// The type responsible for managing the dinamically loaded part of the
+/// The type responsible for managing the dynamically loaded part of the
 /// application. This type should be held in the part that won't be
 /// live-reloaded.
 pub struct Host<API> {
