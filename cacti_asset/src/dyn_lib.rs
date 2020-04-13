@@ -403,6 +403,8 @@ mod tests {
     use super::*;
 
     // TODO: Cross-platform tests
+    // We would need to figure out a way to ad-hoc compile some dynamic library
+    // so we could actually test loading it...
 
     #[test]
     #[cfg(target_os = "windows")]
