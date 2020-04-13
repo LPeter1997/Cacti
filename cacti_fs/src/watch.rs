@@ -2,11 +2,123 @@
 //!
 //! # Usage
 //!
-//! TODO
+//! The library provides a [Watch](trait.Watch.html) trait to implement
+//! different monitoring strategies with. It provides the interface to monitor
+//! filesystem changes on a path either recursively or non-recursively.
+//!
+//! For example, monitoring everything that happens in the folder `C:/TMP`,
+//! assuming that we have an implementation `SomeWatch`:
+//!
+//! ```no_run
+//! # fn main() -> std::io::Result<()> {
+//! use cacti_fs::watch::*;
+//! # struct SomeWatch;
+//! # impl Watch for SomeWatch {
+//! # fn new() -> Result<Self> { Self }
+//! # fn watch(&mut self, p: impl AsRef<Path>, rec: Recursion) -> Result<()> {
+//! # unimplemented!()
+//! # }
+//! # fn unwatch(&mut self, p: impl AsRef<Path>) { unimplemented!() }
+//! # fn poll_event(&mut self) -> Option<Result<Event>> { unimplemented!() }
+//! # }
+//!
+//! let mut watch = SomeWatch::new()?;
+//! // Let's start watching the given path and everything that happens in the
+//! // subpaths
+//! watch.watch("C:/TMP", Recursion::Recursive)?;
+//!
+//! loop {
+//!     if let Some(e) = watch.poll_event() {
+//!         // We have an event to process
+//!         match e {
+//!             Ok(ch) => {
+//!                // A filesystem change happened
+//!                 let ch = e.unwrap();
+//!                 // Just log it
+//!                 println("{:?} event at path {:?} at timestamp {:?}",
+//!                     ch.kind, ch.path, ch.timestamp);
+//!             },
+//!             Err(err) => {
+//!                 // An IO error happened
+//!                 println!("IO error: {}", e.unwrap_err());
+//!             }
+//!         }
+//!     }
+//! }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! There are default implementations provided by the library:
+//!  * [NullWatch](struct.NullWatch.html): An empty implementation, that reports
+//! no changes. Useful for platforms without any filesystem capabilities, just
+//! to make the code compile.
+//!  * [PollWatch](struct.PollWatch.html): The simplest actual monitoring
+//! strategy that keeps track of modification times. For monitoring deep,
+//! recursive hierarchies this could be costly, but for a few tens or hundreds
+//! of files this is probably a fine strategy.
+//!  * Platform-dependent watches: For any platform that has solutions for
+//! monitoring filesystems more efficiently, a platform-specific implementation
+//! is provided through the `DefaultWatch` type name.
+//!
+//! ## Platform-default watch
+//!
+//! The default recommented `Watch` implementation is under the type name
+//! `DefaultWatch`. This could be an alias to the `NullWatch`, `PollWatch` or
+//! some more efficient implementation, depending on the platform.
 //!
 //! # Porting the library to other platforms
 //!
-//! TODO
+//! To port this library to other platforms, the `trait Watch` has to be
+//! implemented for a type and have it aliased as `DefaultWatchImpl` in global
+//! scope for the platform:
+//!
+//! ```no_run
+//! # use std::io::Result;
+//! # use cacti_fs::watch::*;
+//! #[cfg(target_os = "new_platform")]
+//! mod my_platform {
+//!     struct MyPlatformWatch { /* ... */ }
+//!
+//!     impl Watch for MyPlatformWatch {
+//!         /// Here you should create an empty watch, with nothing monitored
+//!         /// initially.
+//!         fn new() -> Result<Self> {
+//!             // ...
+//! # unimplemented!()
+//!         }
+//!
+//!         /// Here you need to start monitoring the path passed with the given
+//!         /// recursion settings. If the path was already monitored, override
+//!         /// the settings.
+//!         fn watch(&mut self, p: impl AsRef<Path>, rec: Recursion) -> Result<()> {
+//!             // ...
+//! # unimplemented!()
+//!         }
+//!
+//!         /// Here stop monitoring the given path.
+//!         fn unwatch(&mut self, p: impl AsRef<Path>) {
+//!             /// ...
+//! # unimplemented!()
+//!         }
+//!
+//!         /// If there are any events that are still not polled by the user,
+//!         /// return the oldest one, otherwise return `None`.
+//!         fn poll_event(&mut self) -> Option<Result<Event>> {
+//!             // ...
+//! # unimplemented!()
+//!         }
+//!     }
+//! }
+//!
+//! #[cfg(target_os = "new_platform")] type DefaultWatchImpl = my_platform::MyPlatformWatch;
+//! ```
+//!
+//! **Note**: This is probably not an easy task on any platform, so you might
+//! want to give `PollWatch` a try first on the new platform. It might just be
+//! fine for you.
+
+// TODO: Platform-specific docs
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -188,7 +300,10 @@ impl Watch for NullWatch {
 ///
 /// **Important**: Polling only tries to poll file statuses, when the `Event`s
 /// are polled from the `PollWatch` and enough time is elapsed based on the
-/// given interval.
+/// given interval. This means, that there's a possibility for this watch to
+/// miss events, if the polling doesn't happen often enough. At least one change
+/// event will still arise, so this could still be fine for detecting if there
+/// was a change.
 #[derive(Debug)]
 pub struct PollWatch {
     last_time: SystemTime,
@@ -497,6 +612,9 @@ impl FileState {
 // TODO: Finish at least the WinAPI implementation
 #[cfg(target_os = "windows")]
 mod win32 {
+    // TODO: We just use this to suppress warnings until we finish implementation
+    #![allow(dead_code)]
+
     #![allow(non_snake_case)]
 
     use std::ffi::{c_void, OsStr};
