@@ -1,0 +1,20 @@
+- windowing (+ keyboard, mouse, controller IO)
+  - opening a window
+  - dpi
+  - event loop
+  - peripherials
+    - keyboard
+    - mouse
+    - controller
+    - touch
+  - extra features where supported
+    - pin to top
+    - transparwncy
+    - resizability
+    - positioning
+    - fullscreen
+- 2D graphics
+  - different backends
+    - first just OpenGL, but have the abstraction
+  - context creation
+  - mostly salvagable from the free_medusa project
