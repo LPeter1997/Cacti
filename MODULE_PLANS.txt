@@ -17,4 +17,4 @@
   - different backends
     - first just OpenGL, but have the abstraction
   - context creation
-  - mostly salvagable from the free_medusa project
+  - mostly salvagable from the free_medusa project (for OpenGL at least)
