@@ -939,7 +939,7 @@ mod tests {
     fn inflate(data: &[u8]) -> Vec<u8> {
         let mut out = Vec::new();
         let mut def = Inflate::new(data);
-        def.read_to_end(&mut out);
+        def.read_to_end(&mut out).unwrap();
         out
     }
 

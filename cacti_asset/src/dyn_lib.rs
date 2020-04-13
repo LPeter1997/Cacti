@@ -1,12 +1,37 @@
-//! Loading and unloading of libraries and symbols at runtime.
+//! Loading and unloading of dynamic/shared libraries and symbols at runtime.
 //!
 //! # Usage
 //!
-//! TODO
+//! First you need to load a dynamic library:
+//!
+//! ```no_run
+//! # fn main() -> std::io::Result<()> {
+//! use cacti_asset::dyn_lib::*;
+//!
+//! let mut lib = Library::load("foo.dll")?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! After that you can load symbols from it:
+//!
+//! ```
+//! # fn main() -> std::io::Result<()> {
+//! # use cacti_asset::dyn_lib::*;
+//! # let mut lib = Library::load("foo.dll")?;
+//! let sym: Symbol<extern "system" fn(u32) -> u32> = lib.load_symbol("GetProcessVersion");
+//! // Calling it
+//! let raw_fn = *sym;
+//! let version = raw_fn(0);
+//! # Ok(())
+//! # }
+//! ```
 //!
 //! # Porting the library to other platforms
 //!
 //! TODO
+
+// TODO: Doc platform-specific usage
 
 use std::io::Result;
 use std::path::Path;

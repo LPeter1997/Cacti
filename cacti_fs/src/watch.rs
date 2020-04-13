@@ -10,11 +10,13 @@
 //! assuming that we have an implementation `SomeWatch`:
 //!
 //! ```no_run
-//! # fn main() -> std::io::Result<()> {
+//! # use std::io::Result;
+//! # use std::path::Path;
+//! # fn main() -> Result<()> {
 //! use cacti_fs::watch::*;
 //! # struct SomeWatch;
 //! # impl Watch for SomeWatch {
-//! # fn new() -> Result<Self> { Self }
+//! # fn new() -> Result<Self> { Ok(Self) }
 //! # fn watch(&mut self, p: impl AsRef<Path>, rec: Recursion) -> Result<()> {
 //! # unimplemented!()
 //! # }
@@ -30,13 +32,13 @@
 //! loop {
 //!     if let Some(e) = watch.poll_event() {
 //!         // We have an event to process
-//!         match e {
+//!         match &e {
 //!             Ok(ch) => {
 //!                // A filesystem change happened
 //!                 let ch = e.unwrap();
 //!                 // Just log it
-//!                 println("{:?} event at path {:?} at timestamp {:?}",
-//!                     ch.kind, ch.path, ch.timestamp);
+//!                 println!("{:?} event at path {:?} at timestamp {:?}",
+//!                     ch.kind, ch.path, ch.time);
 //!             },
 //!             Err(err) => {
 //!                 // An IO error happened
