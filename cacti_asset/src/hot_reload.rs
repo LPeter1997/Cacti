@@ -234,8 +234,8 @@ macro_rules! hot_reload_funcs {
         }
 
         pub fn drop_state(buffer: *mut u8) {
-            // TODO
-            ::std::unimplemented!("drop state");
+            let s: State = unsafe{ ptr::read(buffer.cast()) };
+            mem::drop(s);
         }
 
         pub fn initialize(state: *mut u8, api: *mut u8) {
