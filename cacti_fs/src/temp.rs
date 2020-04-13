@@ -103,6 +103,8 @@
 //! #[cfg(target_os = "new_platform")] type FsTempImpl = my_platform::MyPlatformTemp;
 //! ```
 
+// TODO: Doc platform-specific usage
+
 use std::io::Result;
 use std::path::{Path, PathBuf};
 use std::fs;

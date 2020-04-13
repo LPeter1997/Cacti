@@ -6,7 +6,7 @@
 //! different monitoring strategies with. It provides the interface to monitor
 //! filesystem changes on a path either recursively or non-recursively.
 //!
-//! For example, monitoring everything that happens in the folder `C:/TMP`,
+//! For example, monitoring everything that happens in the directory `C:/TMP`,
 //! assuming that we have an implementation `SomeWatch`:
 //!
 //! ```no_run
@@ -131,7 +131,7 @@ use std::io;
 //                                    API                                     //
 // ////////////////////////////////////////////////////////////////////////// //
 
-/// A filesystem watch that can listen to changes in files and folder
+/// A filesystem watch that can listen to changes in files and directory
 /// structures.
 ///
 /// # Examples
@@ -149,8 +149,9 @@ use std::io;
 ///
 /// // We can set the interval, in case this is a platform with no better
 /// // strategy to support other than polling, or due to some platform-specific
-/// // behavior. For a single file this isn't a huge deal, but for larger folder
-/// // structures it's important to keep poll intervals as long as tolerable.
+/// // behavior. For a single file this isn't a huge deal, but for larger
+/// // directory structures it's important to keep poll intervals as long as
+/// // tolerable.
 /// // Here we just allow polling twice every second.
 /// watch.set_interval(Duration::from_millis(500));
 ///
@@ -212,7 +213,7 @@ pub trait Watch: Sized {
 /// Describes recursion strategies while watching a path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Recursion {
-    /// Watch all the files and subfolders inside.
+    /// Watch all the files and subdirectories inside.
     Recursive,
     /// Only watch this path.
     NotRecursive,
@@ -600,7 +601,7 @@ impl FileState {
                 for (subpath, substate) in substates.iter() {
                     substate.delete_rec(subpath, timestamp, events);
                 }
-                // Then delete folder
+                // Then delete directory
                 events.push_back(Ok(Event::delete(timestamp, path)));
             }
         }
@@ -722,7 +723,7 @@ mod win32 {
         unsafe { SleepEx(millis, 1) };
     }
 
-    /// Opens a file/folder for observing only.
+    /// Opens a file/directory for observing only.
     fn open_handle_for_observe(path: &Path) -> Result<*mut c_void> {
         let handle = unsafe { CreateFileW(
             to_wstring(path.as_os_str()).as_ptr(),

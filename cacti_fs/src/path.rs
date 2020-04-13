@@ -34,9 +34,10 @@
 //! # use std::io::Result;
 //! # use std::path::PathBuf;
 //! # use std::fs::File;
+//! #[cfg(target_os = "new_platform")]
 //! fn path_for(handle: &File) -> Result<PathBuf> {
 //!     // ...
-//! # Ok(PathBuf::new())
+//! # unimplemented!()
 //! }
 //! ```
 //!
