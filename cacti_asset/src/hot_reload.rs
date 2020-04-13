@@ -17,7 +17,7 @@ use crate::dyn_lib::*;
 /// live-reloaded.
 pub struct Host<API> {
     /// Path to the client library.
-    path   : PathBuf,
+    path    : PathBuf,
     /// The loaded client library.
     library: Library,
     /// The last modification time read from the client library's path.
@@ -28,6 +28,16 @@ pub struct Host<API> {
     state  : Option<Vec<u8>>,
     /// The API type the host provides from it's side.
     api    : API,
+    /// The number of library reloads.
+    counter: usize,
+    /// The path we copy out the library file to to allow recompilation.
+    tmppath: PathBuf,
+}
+
+impl <API> Drop for Host<API> {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.tmppath);
+    }
 }
 
 impl <API> Host<API> {
@@ -35,8 +45,12 @@ impl <API> Host<API> {
     /// library.
     pub fn new(api: API, path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref();
-        let mut library = Library::load(path)?;
         let mtime = mtime(path)?;
+
+        // Copy the library
+        let tmppath = lib_path(path, 0);
+        fs::copy(path, &tmppath)?;
+        let mut library = Library::load(&tmppath)?;
         let client = load_symbol(&mut library)?;
 
         Ok(Self{
@@ -46,6 +60,8 @@ impl <API> Host<API> {
             client,
             state: None,
             api,
+            counter: 0,
+            tmppath,
         })
     }
 
@@ -72,12 +88,19 @@ impl <API> Host<API> {
             // We need to reload the library
             // Call unload
             (self.client.unload)(cur_state.as_mut_ptr(), api);
+            // Copy a new version of the library
+            self.counter += 1;
+            let tmppath = lib_path(&self.path, self.counter);
+            fs::copy(&self.path, &tmppath)?;
             // Reload library and symbol
-            let mut library = Library::load(&self.path)?;
+            let mut library = Library::load(&tmppath)?;
             let client = load_symbol(&mut library)?;
             self.library = library;
             self.client = client;
             self.mtime = mtime;
+            // Delete old
+            let _ = fs::remove_file(&self.tmppath);
+            self.tmppath = tmppath;
             // Migrate the state
             let mut new_state = vec![0u8; self.client.state_size];
             (self.client.migrate_state)(
@@ -143,11 +166,11 @@ pub enum Loop {
     Stop,
 }
 
-#[macro_use]
+#[macro_export]
 macro_rules! hot_reload {
-    ( $state:ty ) => {
+    ( $state:ident ) => {
         #[no_mangle]
-        pub static CLIENT_API: $crate::hot_reload::ClientApi =
+        pub static HOT_RELOAD_CLIENT_API: $crate::hot_reload::ClientApi =
         $crate::hot_reload::ClientApi{
             state_size   : ::std::mem::size_of::<$state>(),
             new_state    : hot_reload_api::new_state      ,
@@ -162,9 +185,9 @@ macro_rules! hot_reload {
         };
 
         mod hot_reload_api {
-            type State = super::$ty;
+            type State = super::$state;
 
-            hot_reload_funcs!();
+            $crate::hot_reload_funcs!();
         }
     };
 }
@@ -173,11 +196,13 @@ macro_rules! hot_reload {
 //                               Implementation                               //
 // ////////////////////////////////////////////////////////////////////////// //
 
+#[macro_export(local_inner_macros)]
 macro_rules! hot_reload_funcs {
     () => {
         use ::std::mem;
         use ::std::ptr;
         use ::std::slice;
+        use $crate::hot_reload::*;
 
         // Helpers
 
@@ -197,39 +222,39 @@ macro_rules! hot_reload_funcs {
 
         // Api implementation
 
-        fn new_state(buffer: *mut u8, api: *mut u8) {
+        pub fn new_state(buffer: *mut u8, api: *mut u8) {
             let state = State::new(cast_api(api));
             state_to_buffer(state, buffer);
         }
 
-        fn migrate_state(old: *mut u8, old_size: usize, new: *mut u8, api: *mut u8) {
+        pub fn migrate_state(old: *mut u8, old_size: usize, new: *mut u8, api: *mut u8) {
             let old = unsafe{ slice::from_raw_parts_mut(old, old_size) };
             let new_state = State::migrate(old, cast_api(api));
             state_to_buffer(new_state, new);
         }
 
-        fn drop_state(buffer: *mut u8) {
+        pub fn drop_state(buffer: *mut u8) {
             // TODO
-            unimplemented!("drop state");
+            ::std::unimplemented!("drop state");
         }
 
-        fn initialize(state: *mut u8, api: *mut u8) {
+        pub fn initialize(state: *mut u8, api: *mut u8) {
             State::initialize(cast_state(state), cast_api(api));
         }
 
-        fn reload(state: *mut u8, api: *mut u8) {
+        pub fn reload(state: *mut u8, api: *mut u8) {
             State::reload(cast_state(state), cast_api(api));
         }
 
-        fn unload(state: *mut u8, api: *mut u8) {
+        pub fn unload(state: *mut u8, api: *mut u8) {
             State::unload(cast_state(state), cast_api(api));
         }
 
-        fn terminate(state: *mut u8, api: *mut u8) {
+        pub fn terminate(state: *mut u8, api: *mut u8) {
             State::terminate(cast_state(state), cast_api(api));
         }
 
-        fn update(state: *mut u8, api: *mut u8) -> u32 {
+        pub fn update(state: *mut u8, api: *mut u8) -> u32 {
             let res = State::update(cast_state(state), cast_api(api));
             Loop::to_u32(res)
         }
@@ -241,7 +266,7 @@ impl Loop {
         if n == 0 { Self::Continue } else { Self::Stop }
     }
 
-    fn to_u32(self) -> u32 {
+    pub fn to_u32(self) -> u32 {
         if self == Self::Continue { 0 } else { 1 }
     }
 }
@@ -256,17 +281,23 @@ fn load_symbol(library: &mut Library) -> io::Result<ClientApi> {
     Ok(unsafe{ ptr::read(*sym) })
 }
 
+fn lib_path(path: &Path, cnt: usize, ) -> PathBuf {
+    let mut new_path = path.to_path_buf();
+    new_path.set_extension(format!("tmp_{}", cnt));
+    new_path
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct ClientApi {
-    state_size   : usize,
-    new_state    : fn(*mut u8, *mut u8),
-    migrate_state: fn(*mut u8, usize, *mut u8, *mut u8),
-    drop_state   : fn(*mut u8),
+    pub state_size   : usize,
+    pub new_state    : fn(*mut u8, *mut u8),
+    pub migrate_state: fn(*mut u8, usize, *mut u8, *mut u8),
+    pub drop_state   : fn(*mut u8),
 
-    initialize   : fn(*mut u8, *mut u8),
-    reload       : fn(*mut u8, *mut u8),
-    unload       : fn(*mut u8, *mut u8),
-    terminate    : fn(*mut u8, *mut u8),
-    update       : fn(*mut u8, *mut u8) -> u32,
+    pub initialize   : fn(*mut u8, *mut u8),
+    pub reload       : fn(*mut u8, *mut u8),
+    pub unload       : fn(*mut u8, *mut u8),
+    pub terminate    : fn(*mut u8, *mut u8),
+    pub update       : fn(*mut u8, *mut u8) -> u32,
 }
