@@ -143,6 +143,99 @@ pub enum Loop {
     Stop,
 }
 
+#[macro_use]
+macro_rules! hot_reload {
+    ( $state:ty ) => {
+        #[no_mangle]
+        pub static CLIENT_API: $crate::hot_reload::ClientApi =
+        $crate::hot_reload::ClientApi{
+            state_size   : ::std::mem::size_of::<$state>(),
+            new_state    : hot_reload_api::new_state      ,
+            migrate_state: hot_reload_api::migrate_state  ,
+            drop_state   : hot_reload_api::drop_state     ,
+
+            initialize   : hot_reload_api::initialize     ,
+            reload       : hot_reload_api::reload         ,
+            unload       : hot_reload_api::unload         ,
+            terminate    : hot_reload_api::terminate      ,
+            update       : hot_reload_api::update         ,
+        };
+
+        mod hot_reload_api {
+            type State = super::$ty;
+
+            hot_reload_funcs!();
+        }
+    };
+}
+
+// ////////////////////////////////////////////////////////////////////////// //
+//                               Implementation                               //
+// ////////////////////////////////////////////////////////////////////////// //
+
+macro_rules! hot_reload_funcs {
+    () => {
+        use ::std::mem;
+        use ::std::ptr;
+        use ::std::slice;
+
+        // Helpers
+
+        fn cast_state(buffer: *mut u8) -> &'static mut State {
+            unsafe{ &mut *buffer.cast() }
+        }
+
+        fn cast_api(buffer: *mut u8) -> &'static mut <State as Client>::HostApi {
+            unsafe{ &mut *buffer.cast() }
+        }
+
+        fn state_to_buffer(state: State, buffer: *mut u8) {
+            let state_ptr = &state as *const State as *const u8;
+            unsafe{ ptr::copy(state_ptr, buffer, mem::size_of::<State>()) };
+            mem::forget(state);
+        }
+
+        // Api implementation
+
+        fn new_state(buffer: *mut u8, api: *mut u8) {
+            let state = State::new(cast_api(api));
+            state_to_buffer(state, buffer);
+        }
+
+        fn migrate_state(old: *mut u8, old_size: usize, new: *mut u8, api: *mut u8) {
+            let old = unsafe{ slice::from_raw_parts_mut(old, old_size) };
+            let new_state = State::migrate(old, cast_api(api));
+            state_to_buffer(new_state, new);
+        }
+
+        fn drop_state(buffer: *mut u8) {
+            // TODO
+            unimplemented!("drop state");
+        }
+
+        fn initialize(state: *mut u8, api: *mut u8) {
+            State::initialize(cast_state(state), cast_api(api));
+        }
+
+        fn reload(state: *mut u8, api: *mut u8) {
+            State::reload(cast_state(state), cast_api(api));
+        }
+
+        fn unload(state: *mut u8, api: *mut u8) {
+            State::unload(cast_state(state), cast_api(api));
+        }
+
+        fn terminate(state: *mut u8, api: *mut u8) {
+            State::terminate(cast_state(state), cast_api(api));
+        }
+
+        fn update(state: *mut u8, api: *mut u8) -> u32 {
+            let res = State::update(cast_state(state), cast_api(api));
+            Loop::to_u32(res)
+        }
+    };
+}
+
 impl Loop {
     fn from_u32(n: u32) -> Self {
         if n == 0 { Self::Continue } else { Self::Stop }
@@ -153,17 +246,13 @@ impl Loop {
     }
 }
 
-// ////////////////////////////////////////////////////////////////////////// //
-//                               Implementation                               //
-// ////////////////////////////////////////////////////////////////////////// //
-
 fn mtime(path: &Path) -> io::Result<SystemTime> {
     fs::metadata(path)
         .and_then(|m| m.modified().or_else(|_| m.created()))
 }
 
 fn load_symbol(library: &mut Library) -> io::Result<ClientApi> {
-    let sym: Symbol<*const ClientApi> = library.load_symbol("CLIENT_API")?;
+    let sym: Symbol<*const ClientApi> = library.load_symbol("HOT_RELOAD_CLIENT_API")?;
     Ok(unsafe{ ptr::read(*sym) })
 }
 

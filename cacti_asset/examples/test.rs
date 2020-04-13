@@ -1,5 +1,6 @@
 
 use cacti_asset::dyn_lib::*;
+use cacti_asset::hot_reload::*;
 
 fn main() {
     let mut lib = Library::load("kernel32").expect("Could not load library!");
