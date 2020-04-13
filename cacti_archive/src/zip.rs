@@ -7,6 +7,29 @@ use std::time::{SystemTime, Duration};
 use std::convert::{TryFrom, TryInto};
 use crate::deflate::Inflate;
 
+/// A structure for calculating CRC32.
+struct Crc32(u32);
+
+impl Crc32 {
+    /// The magic number used in CRC.
+    const MAGIC: u32 = 0xdebb20e3;
+
+    /// Creates a new `Crc32` with a default value.
+    fn new() -> Self { Self(0xffffffff) }
+
+    /// Returns the result of the `Crc32`.
+    fn finalize(self) -> u32 { !self.0 }
+
+    /// Adds a byte to the `Crc32`.
+    fn push(&mut self, byte: u8) {
+        self.0 ^= byte as u32;
+        for _ in 0..8 {
+            let mask = !(self.0 & 1).wrapping_sub(1);
+            self.0 = (self.0 >> 1) ^ (Self::MAGIC & mask);
+        }
+    }
+}
+
 /// The internal reader.
 #[derive(Debug)]
 struct ByteReader<R: Read + Seek> {
@@ -516,7 +539,7 @@ pub struct ZipFile<'a, R: Read + Seek> {
     crc32            : u32        ,
 }
 
-// TODO: CRC32 checks
+// TODO: Fix CRC32 checks
 
 impl <'a, R: Read + Seek> ZipFile<'a, R> {
     /// Creates the `ZipFile` from the given reader and `FileHeader`.
@@ -571,6 +594,30 @@ impl <'a, R: Read + Seek> ZipFile<'a, R> {
         }
         self.reader.seek(io::SeekFrom::Start(self.data_offset as u64))?;
         Ok(self.compression.create_decompressor(&mut self.reader, self.compressed_size))
+    }
+
+    /// Checks integrity using the stored CRC32 value. Returns `true`, if the
+    /// check was valid.
+    pub fn check_crc32(&mut self) -> io::Result<bool> {
+        const BUFFER_SIZE: usize = 32;
+
+        let mut buffer = [0u8; BUFFER_SIZE];
+        self.reader.seek(io::SeekFrom::Start(self.data_offset as u64))?;
+
+        let mut crc = Crc32::new();
+        let mut remaining = self.compressed_size;
+        while remaining > 0 {
+            let can_read = std::cmp::min(remaining, BUFFER_SIZE);
+            self.reader.read_exact(&mut buffer[..can_read])?;
+
+            for i in 0..can_read {
+                crc.push(buffer[i]);
+            }
+
+            remaining -= can_read;
+        }
+
+        Ok(crc.finalize() == self.crc32)
     }
 }
 
