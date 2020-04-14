@@ -68,26 +68,18 @@ impl <API> Host<API> {
     /// Updates the client and returns the status returned by the client's
     /// update method.
     pub fn update(&mut self) -> io::Result<Loop> {
-        let api = (&mut self.api as *mut API).cast();
         if self.state.is_none() {
-            // We need to create the state
-            let mut state = vec![0u8; self.client.state_size];
-            (self.client.new_state)(state.as_mut_ptr(), api);
-            self.state = Some(state);
-            let cur_state = self.state.as_mut().unwrap();
-            // Call initialize
-            (self.client.initialize)(cur_state.as_mut_ptr(), api);
-            // Call reload
-            (self.client.reload)(cur_state.as_mut_ptr(), api);
+            // Create new state, initialize, reload
+            self.new_state();
+            self.initialize_client();
+            self.reload_client();
         }
-        // Here we must have a valid state
-        let cur_state = self.state.as_mut().unwrap();
         // Check if we need to reload the library
         let mtime = mtime(&self.path)?;
         if mtime != self.mtime {
             // We need to reload the library
             // Call unload
-            (self.client.unload)(cur_state.as_mut_ptr(), api);
+            self.unload_client();
             // Copy a new version of the library
             self.counter += 1;
             let tmppath = lib_path(&self.path, self.counter);
@@ -96,34 +88,25 @@ impl <API> Host<API> {
             let mut library = Library::load(&tmppath)?;
             let client = load_symbol(&mut library)?;
             self.library = library;
-            self.client = client;
             self.mtime = mtime;
             // Delete old
             let _ = fs::remove_file(&self.tmppath);
             self.tmppath = tmppath;
             // Migrate the state
-            let mut new_state = vec![0u8; self.client.state_size];
-            (self.client.migrate_state)(
-                cur_state.as_mut_ptr(),
-                cur_state.len(),
-                new_state.as_mut_ptr(),
-                api);
-            self.state = Some(new_state);
-            let cur_state = self.state.as_mut().unwrap();
+            self.migrate_state(client);
             // Call reload
-            (self.client.reload)(cur_state.as_mut_ptr(), api);
+            self.reload_client();
         }
-        let cur_state = self.state.as_mut().unwrap();
         // Now perform the update
-        let loop_res = (self.client.update)(cur_state.as_mut_ptr(), api);
+        let loop_res = self.update_client();
         let loop_res = Loop::from_u32(loop_res);
         if loop_res == Loop::Stop {
             // Call unload
-            (self.client.unload)(cur_state.as_mut_ptr(), api);
+            self.unload_client();
             // Call terminate
-            (self.client.terminate)(cur_state.as_mut_ptr(), api);
+            self.terminate_client();
             // Destroy the state
-            (self.client.drop_state)(cur_state.as_mut_ptr());
+            self.drop_state();
             self.state = None;
         }
         Ok(loop_res)
@@ -259,6 +242,59 @@ macro_rules! hot_reload_funcs {
             Loop::to_u32(res)
         }
     };
+}
+
+impl <API> Host<API> {
+    fn state_mut_ptr(&mut self) -> *mut u8 {
+        self.state.as_mut().unwrap().as_mut_ptr()
+    }
+
+    fn api_mut_ptr(&mut self) -> *mut u8 {
+        (&mut self.api as *mut API).cast()
+    }
+
+    fn new_state(&mut self) {
+        let mut result = vec![0u8; self.client.state_size];
+        (self.client.new_state)(result.as_mut_ptr(), self.api_mut_ptr());
+        self.state = Some(result);
+    }
+
+    fn migrate_state(&mut self, new_client: ClientApi) {
+        self.client = new_client;
+        let mut old_state = self.state.take().unwrap();
+        let mut new_state = vec![0u8; self.client.state_size];
+        (self.client.migrate_state)(
+            old_state.as_mut_ptr(),
+            old_state.len(),
+            new_state.as_mut_ptr(),
+            self.api_mut_ptr());
+        self.state = Some(new_state);
+    }
+
+    fn drop_state(&mut self) {
+        (self.client.drop_state)(self.state_mut_ptr());
+        self.state = None;
+    }
+
+    fn initialize_client(&mut self) {
+        (self.client.initialize)(self.state_mut_ptr(), self.api_mut_ptr());
+    }
+
+    fn reload_client(&mut self) {
+        (self.client.reload)(self.state_mut_ptr(), self.api_mut_ptr());
+    }
+
+    fn unload_client(&mut self) {
+        (self.client.unload)(self.state_mut_ptr(), self.api_mut_ptr());
+    }
+
+    fn terminate_client(&mut self) {
+        (self.client.terminate)(self.state_mut_ptr(), self.api_mut_ptr());
+    }
+
+    fn update_client(&mut self) -> u32 {
+        (self.client.update)(self.state_mut_ptr(), self.api_mut_ptr())
+    }
 }
 
 impl Loop {
