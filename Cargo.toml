@@ -4,4 +4,5 @@ members = [
     "cacti_fs",
     "cacti_archive",
     "cacti_asset",
+    "cacti_window",
 ]

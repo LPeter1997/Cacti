@@ -1,6 +1,6 @@
 - windowing (+ keyboard, mouse, controller IO)
+  - screens, dpi
   - opening a window
-  - dpi
   - event loop
   - peripherials
     - keyboard
@@ -18,3 +18,8 @@
     - first just OpenGL, but have the abstraction
   - context creation
   - mostly salvagable from the free_medusa project (for OpenGL at least)
+
+WE NEED EXAMPLES IN EVERY PROJECT
+
+Also, let's not do that trait-subtype thingy, make the "subtype" a trait too or
+something. Or at least give it a trait.
