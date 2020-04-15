@@ -1,33 +1,54 @@
+//! TODO: doc
+
+use std::io;
+use std::ffi::c_void;
 
 // ////////////////////////////////////////////////////////////////////////// //
 //                                    API                                     //
 // ////////////////////////////////////////////////////////////////////////// //
 
-pub struct Monitor(MonitorImpl);
+pub struct Monitor {
+    monitor: MonitorImpl,
+    info: MonitorInfo,
+}
 
 impl Monitor {
     pub fn all_monitors() -> Vec<Self> {
-        MonitorImpl::all_monitors().into_iter().map(|m| Self(m)).collect()
+        MonitorImpl::all_monitors().into_iter().filter_map(|monitor|
+            monitor.info().ok().map(|info| Self{ monitor, info })
+        ).collect()
     }
 
-    pub fn position(&self) -> (isize, isize) {
-        self.0.position()
+    pub fn handle_ptr(&self) -> *const c_void {
+        self.monitor.handle_ptr()
     }
 
-    pub fn resolution(&self) -> (usize, usize) {
-        self.0.resolution()
+    pub fn handle_mut_ptr(&mut self) -> *mut c_void {
+        self.monitor.handle_mut_ptr()
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        self.info.name.as_ref().map(|n| n.as_str())
+    }
+
+    pub fn position(&self) -> (i32, i32) {
+        self.info.position
+    }
+
+    pub fn size(&self) -> (u32, u32) {
+        self.info.size
     }
 
     pub fn dpi(&self) -> (f64, f64) {
-        self.0.dpi()
+        self.info.dpi
     }
 
     pub fn scale(&self) -> f64 {
-        self.0.scale()
+        self.info.scale
     }
 
     pub fn is_primary(&self) -> bool {
-        self.0.is_primary()
+        self.info.primary
     }
 }
 
@@ -37,11 +58,20 @@ impl Monitor {
 
 trait MonitorTrait: Sized {
     fn all_monitors() -> Vec<Self>;
-    fn position(&self) -> (isize, isize);
-    fn resolution(&self) -> (usize, usize);
-    fn dpi(&self) -> (f64, f64);
-    fn scale(&self) -> f64;
-    fn is_primary(&self) -> bool;
+
+    fn handle_ptr(&self) -> *const c_void;
+    fn handle_mut_ptr(&mut self) -> *mut c_void;
+
+    fn info(&self) -> io::Result<MonitorInfo>;
+}
+
+struct MonitorInfo {
+    name    : Option<String>,
+    position: (i32, i32),
+    size    : (u32, u32),
+    dpi     : (f64, f64),
+    scale   : f64,
+    primary : bool,
 }
 
 // WinAPI implementation ///////////////////////////////////////////////////////
@@ -66,7 +96,7 @@ mod win32 {
 
         fn GetMonitorInfoW(
             hmonitor: *mut c_void,
-            info: *mut MONITORINFO,
+            info: *mut MONITORINFOEXW,
         ) -> i32;
     }
 
@@ -104,16 +134,17 @@ mod win32 {
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
-    struct MONITORINFO {
+    struct MONITORINFOEXW {
         cbSize      : u32 ,
         monitor_rect: RECT,
         work_rect   : RECT,
         flags       : u32 ,
+        dev_name    : [u16; 32],
     }
 
-    impl MONITORINFO {
+    impl MONITORINFOEXW {
         fn new() -> Self {
-            let mut res: MONITORINFO = unsafe{ mem::zeroed() };
+            let mut res: MONITORINFOEXW = unsafe{ mem::zeroed() };
             res.cbSize = mem::size_of::<Self>() as u32;
             res
         }
@@ -135,13 +166,6 @@ mod win32 {
             monitors.push(Self{ hmonitor });
             1
         }
-
-        fn monitor_info(&self) -> MONITORINFO {
-            let mut info = MONITORINFO::new();
-            // TODO: Error handling
-            unsafe{ GetMonitorInfoW(self.hmonitor, &mut info) };
-            info
-        }
     }
 
     impl MonitorTrait for Win32Monitor {
@@ -155,47 +179,57 @@ mod win32 {
             monitors
         }
 
-        fn position(&self) -> (isize, isize) {
-            let info = self.monitor_info();
-            let rect = info.monitor_rect;
-            (rect.left as isize, rect.top as isize)
-        }
+        fn handle_ptr(&self) -> *const c_void { self.hmonitor }
+        fn handle_mut_ptr(&mut self) -> *mut c_void { self.hmonitor }
 
-        fn resolution(&self) -> (usize, usize) {
-            let info = self.monitor_info();
+        fn info(&self) -> io::Result<MonitorInfo> {
+            // Get MONITORINFOEXW
+            let mut info = MONITORINFOEXW::new();
+            let ret = unsafe{ GetMonitorInfoW(self.hmonitor, &mut info) };
+            if ret == 0 {
+                // TODO: Return error
+                unimplemented!();
+            }
             let rect = info.monitor_rect;
-            let width = (rect.right - rect.left) as usize;
-            let height = (rect.bottom - rect.top) as usize;
-            (width, height)
-        }
+            let primary = (info.flags & MONITORINFOF_PRIMARY) != 0;
+            // Decode name
+            let null_pos = info.dev_name.iter().position(|c| *c == 0).unwrap_or(32);
+            let name = String::from_utf16_lossy(&info.dev_name[0..null_pos]);
 
-        fn dpi(&self) -> (f64, f64) {
+            // Get DPI
             let mut dpix = 0u32;
             let mut dpiy = 0u32;
-            // TODO: Error handling
-            unsafe{ GetDpiForMonitor(
+            let ret = unsafe{ GetDpiForMonitor(
                 self.hmonitor,
                 MDT_RAW_DPI,
                 &mut dpix,
                 &mut dpiy) };
-            (dpix as f64, dpiy as f64)
-        }
-
-        fn scale(&self) -> f64 {
-            // TODO: Error handling
-            let mut factor = 0u32;
-            unsafe{ GetScaleFactorForMonitor(self.hmonitor, &mut factor) };
-
-            match factor {
-                // TODO: Error handling
-                DEVICE_SCALE_FACTOR_INVALID => unimplemented!(),
-                x => (x as f64) /100.0,
+            if ret != 0 {
+                // TODO: Return error
+                unimplemented!();
             }
-        }
 
-        fn is_primary(&self) -> bool {
-            let info = self.monitor_info();
-            (info.flags & MONITORINFOF_PRIMARY) != 0
+            // Get scale factor
+            let mut sfactor = 0u32;
+            let ret = unsafe{ GetScaleFactorForMonitor(self.hmonitor, &mut sfactor) };
+            if ret != 0 {
+                // TODO: Return error
+                unimplemented!();
+            }
+            if sfactor == DEVICE_SCALE_FACTOR_INVALID {
+                // TODO: Return error
+                unimplemented!();
+            }
+            let scale = (sfactor as f64) / 100.0;
+
+            Ok(MonitorInfo{
+                name: Some(name),
+                position: (rect.left, rect.top),
+                size: ((rect.right - rect.left) as u32, (rect.bottom - rect.top) as u32),
+                dpi: (dpix as f64, dpiy as f64),
+                scale,
+                primary,
+            })
         }
     }
 }
