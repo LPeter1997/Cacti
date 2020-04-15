@@ -68,33 +68,40 @@ impl Window {
         self.window.inner_size()
     }
 
-    pub fn set_visible(&self, vis: bool) {
+    pub fn outer_size(&self) -> (u32, u32) {
+        self.window.outer_size()
+    }
+
+    pub fn set_visible(&mut self, vis: bool) {
         self.window.set_visible(vis)
     }
 
-    pub fn set_title(&self, title: &str) -> bool {
+    pub fn set_resizable(&mut self, res: bool) -> bool {
+        self.window.set_resizable(res)
+    }
+
+    pub fn set_title(&mut self, title: &str) -> bool {
         self.window.set_title(title)
     }
 
-    pub fn set_position(&self, x: i32, y: i32) -> bool {
+    pub fn set_position(&mut self, x: i32, y: i32) -> bool {
         self.window.set_position(x, y)
     }
 
-    pub fn set_inner_size(&self, w: u32, h: u32) -> bool {
+    pub fn set_inner_size(&mut self, w: u32, h: u32) -> bool {
         self.window.set_inner_size(w, h)
     }
 
-    pub fn set_pinned(&self, p: bool) -> bool {
+    pub fn set_pinned(&mut self, p: bool) -> bool {
         self.window.set_pinned(p)
     }
 
-    pub fn set_transparency(&self, t: f64) -> bool {
+    pub fn set_transparency(&mut self, t: f64) -> bool {
         self.window.set_transparency(t)
     }
 
     pub fn run_event_loop<F>(&mut self, mut f: F) where F: FnMut() {
-        // TODO
-        f();
+        self.window.run_event_loop(f);
     }
 }
 
@@ -129,12 +136,15 @@ trait WindowTrait: Sized {
     fn inner_size(&self) -> (u32, u32);
     fn outer_size(&self) -> (u32, u32);
 
-    fn set_visible(&self, vis: bool);
-    fn set_title(&self, title: &str) -> bool;
-    fn set_position(&self, x: i32, y: i32) -> bool;
-    fn set_inner_size(&self, w: u32, h: u32) -> bool;
-    fn set_pinned(&self, p: bool) -> bool;
-    fn set_transparency(&self, t: f64) -> bool;
+    fn set_visible(&mut self, vis: bool);
+    fn set_resizable(&mut self, res: bool) -> bool;
+    fn set_title(&mut self, title: &str) -> bool;
+    fn set_position(&mut self, x: i32, y: i32) -> bool;
+    fn set_inner_size(&mut self, w: u32, h: u32) -> bool;
+    fn set_pinned(&mut self, p: bool) -> bool;
+    fn set_transparency(&mut self, t: f64) -> bool;
+
+    fn run_event_loop<F>(&mut self, f: F) where F: FnMut();
 }
 
 // WinAPI implementation ///////////////////////////////////////////////////////
@@ -196,6 +206,58 @@ mod win32 {
             wparam: u32,
             lparam: i32,
         ) -> i32;
+
+        fn SetWindowTextW(
+            hwnd: *mut c_void,
+            title: *const u16,
+        ) -> i32;
+
+        fn SetWindowPos(
+            hwnd: *mut c_void,
+            hwnd_after: *mut c_void,
+            x: i32,
+            y: i32,
+            w: i32,
+            h: i32,
+            flags: u32,
+        ) -> i32;
+
+        fn AdjustWindowRectEx(
+            rect: *mut RECT,
+            style: u32,
+            menu: i32,
+            ex_style: u32,
+        ) -> i32;
+
+        fn GetWindowLongA(
+            hwnd: *mut c_void,
+            index: i32,
+        ) -> i32;
+
+        fn SetWindowLongA(
+            hwnd: *mut c_void,
+            index: i32,
+            new: i32,
+        ) -> i32;
+
+        fn GetMessageW(
+            msg: *mut MSG,
+            hwnd: *mut c_void,
+            min: u32,
+            max: u32,
+        ) -> i32;
+
+        fn PeekMessageW(
+            msg: *mut MSG,
+            hwnd: *mut c_void,
+            min: u32,
+            max: u32,
+            action: u32,
+        ) -> i32;
+
+        fn TranslateMessage(msg: *const MSG) -> i32;
+
+        fn DispatchMessageW(msg: *const MSG) -> i32;
     }
 
     #[link(name = "shcore")]
@@ -221,14 +283,31 @@ mod win32 {
 
     const DEVICE_SCALE_FACTOR_INVALID: u32 = 0;
 
+    const WS_OVERLAPPED: u32 = 0x00000000;
+    const WS_THICKFRAME: u32 = 0x00040000;
     const WS_CAPTION: u32 = 0x00C00000;
     const WS_SYSMENU: u32 = 0x00080000;
     const WS_MINIMIZEBOX: u32 = 0x00020000;
+    const WS_MAXIMIZEBOX: u32 = 0x00010000;
+    const WS_OVERLAPPEDWINDOW: u32 =
+          WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU
+        | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
 
     const CW_USEDEFAULT: i32 = 0x80000000u32 as i32;
 
     const SW_HIDE: i32 = 0;
     const SW_SHOW: i32 = 5;
+
+    const HWND_TOP: *mut c_void = 0 as *mut c_void;
+
+    const SWP_NOSIZE: u32 = 0x0001;
+    const SWP_NOMOVE: u32 = 0x0002;
+    const SWP_NOZORDER: u32 = 0x0004;
+
+    const GWL_STYLE: i32 = -16;
+    const GWL_EXSTYLE: i32 = -20;
+
+    const PM_REMOVE: u32 = 0x0001;
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
@@ -273,6 +352,31 @@ mod win32 {
     }
 
     impl WNDCLASSW {
+        fn new() -> Self {
+            unsafe{ mem::zeroed() }
+        }
+    }
+
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy)]
+    struct POINT {
+        x: i32,
+        y: i32,
+    }
+
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy)]
+    struct MSG {
+        hwnd: *mut c_void,
+        message: u32,
+        wparam: u32,
+        lparam: i32,
+        time: u32,
+        point: POINT,
+        private: u32,
+    }
+
+    impl MSG {
         fn new() -> Self {
             unsafe{ mem::zeroed() }
         }
@@ -405,7 +509,7 @@ mod win32 {
                 0,
                 class_name.as_ptr(),
                 window_name.as_ptr(),
-                WS_CAPTION | WS_MINIMIZEBOX | WS_SYSMENU,
+                WS_OVERLAPPEDWINDOW,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
@@ -434,29 +538,74 @@ mod win32 {
             unimplemented!()
         }
 
-        fn set_visible(&self, vis: bool) {
+        fn set_visible(&mut self, vis: bool) {
             let cmd = if vis { SW_SHOW } else { SW_HIDE };
             unsafe{ ShowWindow(self.hwnd, cmd) };
         }
 
-        fn set_title(&self, title: &str) -> bool {
+        fn set_resizable(&mut self, res: bool) -> bool {
             unimplemented!()
         }
 
-        fn set_position(&self, x: i32, y: i32) -> bool {
+        fn set_title(&mut self, title: &str) -> bool {
+            let wtitle = to_wstring(OsStr::new(title));
+            unsafe{ SetWindowTextW(self.hwnd, wtitle.as_ptr()) != 0 }
+        }
+
+        fn set_position(&mut self, x: i32, y: i32) -> bool {
+            unsafe{ SetWindowPos(
+                self.hwnd,
+                HWND_TOP,
+                x,
+                y,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER) != 0 }
+        }
+
+        fn set_inner_size(&mut self, w: u32, h: u32) -> bool {
+            let style = unsafe{ GetWindowLongA(self.hwnd, GWL_STYLE) };
+            let exstyle = unsafe{ GetWindowLongA(self.hwnd, GWL_EXSTYLE) };
+            let mut rect = RECT{
+                left: 0,
+                top: 0,
+                right: w as i32,
+                bottom: h as i32,
+            };
+            let ret = unsafe{ AdjustWindowRectEx(&mut rect, style as u32, 0, exstyle as u32) };
+            if ret == 0 {
+                return false;
+            }
+            unsafe{ SetWindowPos(
+                self.hwnd,
+                HWND_TOP,
+                0,
+                0,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+                SWP_NOMOVE | SWP_NOZORDER) != 0 }
+        }
+
+        fn set_pinned(&mut self, p: bool) -> bool {
             unimplemented!()
         }
 
-        fn set_inner_size(&self, w: u32, h: u32) -> bool {
+        fn set_transparency(&mut self, t: f64) -> bool {
             unimplemented!()
         }
 
-        fn set_pinned(&self, p: bool) -> bool {
-            unimplemented!()
-        }
-
-        fn set_transparency(&self, t: f64) -> bool {
-            unimplemented!()
+        fn run_event_loop<F>(&mut self, mut f: F) where F: FnMut() {
+            let mut msg = MSG::new();
+            loop {
+                f();
+                let res = unsafe{ PeekMessageW(&mut msg, self.hwnd, 0, 0, PM_REMOVE) };
+                if res != 0 {
+                    unsafe{
+                        TranslateMessage(&mut msg);
+                        DispatchMessageW(&mut msg);
+                    }
+                }
+            }
         }
     }
 }
