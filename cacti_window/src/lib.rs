@@ -52,6 +52,51 @@ impl Monitor {
     }
 }
 
+pub struct Window {
+    window: WindowImpl,
+}
+
+impl Window {
+    pub fn new() -> Self {
+        Self{ window: WindowImpl::new() }
+    }
+
+    pub fn handle_ptr(&self) -> *const c_void { self.window.handle_ptr() }
+    pub fn handle_mut_ptr(&mut self) -> *mut c_void { self.window.handle_mut_ptr() }
+
+    pub fn inner_size(&self) -> (u32, u32) {
+        self.window.inner_size()
+    }
+
+    pub fn set_visible(&self, vis: bool) {
+        self.window.set_visible(vis)
+    }
+
+    pub fn set_title(&self, title: &str) -> bool {
+        self.window.set_title(title)
+    }
+
+    pub fn set_position(&self, x: i32, y: i32) -> bool {
+        self.window.set_position(x, y)
+    }
+
+    pub fn set_inner_size(&self, w: u32, h: u32) -> bool {
+        self.window.set_inner_size(w, h)
+    }
+
+    pub fn set_pinned(&self, p: bool) -> bool {
+        self.window.set_pinned(p)
+    }
+
+    pub fn set_transparency(&self, t: f64) -> bool {
+        self.window.set_transparency(t)
+    }
+
+    pub fn run_event_loop<F>(&mut self, f: F) where F: FnMut() {
+        unimplemented!()
+    }
+}
+
 // ////////////////////////////////////////////////////////////////////////// //
 //                               Implementation                               //
 // ////////////////////////////////////////////////////////////////////////// //
@@ -72,6 +117,22 @@ struct MonitorInfo {
     dpi     : (f64, f64),
     scale   : f64,
     primary : bool,
+}
+
+trait WindowTrait: Sized {
+    fn new() -> Self;
+
+    fn handle_ptr(&self) -> *const c_void;
+    fn handle_mut_ptr(&mut self) -> *mut c_void;
+
+    fn inner_size(&self) -> (u32, u32);
+
+    fn set_visible(&self, vis: bool);
+    fn set_title(&self, title: &str) -> bool;
+    fn set_position(&self, x: i32, y: i32) -> bool;
+    fn set_inner_size(&self, w: u32, h: u32) -> bool;
+    fn set_pinned(&self, p: bool) -> bool;
+    fn set_transparency(&self, t: f64) -> bool;
 }
 
 // WinAPI implementation ///////////////////////////////////////////////////////
@@ -232,6 +293,49 @@ mod win32 {
             })
         }
     }
+
+    #[derive(Debug)]
+    pub struct Win32Window {
+        hwnd: *mut c_void,
+    }
+
+    impl WindowTrait for Win32Window {
+        fn new() -> Self {
+            unimplemented!()
+        }
+
+        fn handle_ptr(&self) -> *const c_void { self.hwnd }
+        fn handle_mut_ptr(&mut self) -> *mut c_void { self.hwnd }
+
+        fn inner_size(&self) -> (u32, u32) {
+            unimplemented!()
+        }
+
+        fn set_visible(&self, vis: bool) {
+            unimplemented!()
+        }
+
+        fn set_title(&self, title: &str) -> bool {
+            unimplemented!()
+        }
+
+        fn set_position(&self, x: i32, y: i32) -> bool {
+            unimplemented!()
+        }
+
+        fn set_inner_size(&self, w: u32, h: u32) -> bool {
+            unimplemented!()
+        }
+
+        fn set_pinned(&self, p: bool) -> bool {
+            unimplemented!()
+        }
+
+        fn set_transparency(&self, t: f64) -> bool {
+            unimplemented!()
+        }
+    }
 }
 
 #[cfg(target_os = "windows")] type MonitorImpl = win32::Win32Monitor;
+#[cfg(target_os = "windows")] type WindowImpl = win32::Win32Window;
