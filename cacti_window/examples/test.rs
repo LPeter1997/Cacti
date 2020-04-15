@@ -13,6 +13,9 @@ fn main() -> io::Result<()> {
     wnd.set_position(100, 100);
     wnd.set_inner_size(960, 540);
     wnd.set_visible(true);
+    wnd.set_resizable(false);
+    wnd.set_pinned(true);
+    wnd.set_transparency(0.5);
 
     wnd.run_event_loop(|| {
 

@@ -258,6 +258,13 @@ mod win32 {
         fn TranslateMessage(msg: *const MSG) -> i32;
 
         fn DispatchMessageW(msg: *const MSG) -> i32;
+
+        fn SetLayeredWindowAttributes(
+            hwnd: *mut c_void,
+            color: u32,
+            alpha: u8,
+            flags: u32,
+        ) -> i32;
     }
 
     #[link(name = "shcore")]
@@ -293,12 +300,16 @@ mod win32 {
           WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU
         | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
 
+    const WS_EX_LAYERED: u32 = 0x00080000;
+
     const CW_USEDEFAULT: i32 = 0x80000000u32 as i32;
 
     const SW_HIDE: i32 = 0;
     const SW_SHOW: i32 = 5;
 
     const HWND_TOP: *mut c_void = 0 as *mut c_void;
+    const HWND_TOPMOST: *mut c_void = (-1isize) as *mut c_void;
+    const HWND_NOTOPMOST: *mut c_void = (-2isize) as *mut c_void;
 
     const SWP_NOSIZE: u32 = 0x0001;
     const SWP_NOMOVE: u32 = 0x0002;
@@ -308,6 +319,8 @@ mod win32 {
     const GWL_EXSTYLE: i32 = -20;
 
     const PM_REMOVE: u32 = 0x0001;
+
+    const LWA_ALPHA: u32 = 0x00000002;
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
@@ -506,7 +519,7 @@ mod win32 {
 
             // Window
             let hwnd = unsafe{ CreateWindowExW(
-                0,
+                WS_EX_LAYERED,
                 class_name.as_ptr(),
                 window_name.as_ptr(),
                 WS_OVERLAPPEDWINDOW,
@@ -544,7 +557,11 @@ mod win32 {
         }
 
         fn set_resizable(&mut self, res: bool) -> bool {
-            unimplemented!()
+            const FLAGS: u32 = WS_MAXIMIZEBOX | WS_THICKFRAME;
+            let style = unsafe{ GetWindowLongA(self.hwnd, GWL_STYLE) } as u32;
+            let newstyle = if res { style | FLAGS } else { style & !FLAGS };
+            unsafe{ SetWindowLongA(self.hwnd, GWL_STYLE, newstyle as i32) };
+            true
         }
 
         fn set_title(&mut self, title: &str) -> bool {
@@ -587,11 +604,24 @@ mod win32 {
         }
 
         fn set_pinned(&mut self, p: bool) -> bool {
-            unimplemented!()
+            let tm = if p { HWND_TOPMOST } else { HWND_NOTOPMOST };
+            unsafe{ SetWindowPos(
+                self.hwnd,
+                tm,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE) != 0 }
         }
 
         fn set_transparency(&mut self, t: f64) -> bool {
-            unimplemented!()
+            let b = (t * 255.0) as u8;
+            unsafe{ SetLayeredWindowAttributes(
+                self.hwnd,
+                0,
+                b,
+                LWA_ALPHA) != 0 }
         }
 
         fn run_event_loop<F>(&mut self, mut f: F) where F: FnMut() {
