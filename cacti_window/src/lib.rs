@@ -92,8 +92,9 @@ impl Window {
         self.window.set_transparency(t)
     }
 
-    pub fn run_event_loop<F>(&mut self, f: F) where F: FnMut() {
-        unimplemented!()
+    pub fn run_event_loop<F>(&mut self, mut f: F) where F: FnMut() {
+        // TODO
+        f();
     }
 }
 
@@ -126,6 +127,7 @@ trait WindowTrait: Sized {
     fn handle_mut_ptr(&mut self) -> *mut c_void;
 
     fn inner_size(&self) -> (u32, u32);
+    fn outer_size(&self) -> (u32, u32);
 
     fn set_visible(&self, vis: bool);
     fn set_title(&self, title: &str) -> bool;
@@ -141,10 +143,16 @@ trait WindowTrait: Sized {
 mod win32 {
     #![allow(non_snake_case)]
 
-    use std::ffi::c_void;
+    use std::ffi::{OsStr, c_void};
+    use std::os::windows::ffi::OsStrExt;
     use std::ptr;
     use std::mem;
     use super::*;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetModuleHandleW(name: *const u16) -> *mut c_void;
+    }
 
     #[link(name = "user32")]
     extern "system" {
@@ -159,9 +167,36 @@ mod win32 {
             hmonitor: *mut c_void,
             info: *mut MONITORINFOEXW,
         ) -> i32;
-    }
 
-    const MONITORINFOF_PRIMARY: u32 = 1;
+        fn RegisterClassW(class: *const WNDCLASSW) -> u16;
+
+        fn CreateWindowExW(
+            ex_style: u32,
+            class_name: *const u16,
+            window_name: *const u16,
+            style: u32,
+            x: i32,
+            y: i32,
+            width: i32,
+            height: i32,
+            parent: *mut c_void,
+            menu: *mut c_void,
+            hinstance: *mut c_void,
+            param: *mut c_void,
+        ) -> *mut c_void;
+
+        fn ShowWindow(
+            hwnd: *mut c_void,
+            cmd: i32,
+        ) -> i32;
+
+        fn DefWindowProcW(
+            hwnd: *mut c_void,
+            msg: u32,
+            wparam: u32,
+            lparam: i32,
+        ) -> i32;
+    }
 
     #[link(name = "shcore")]
     extern "system" {
@@ -178,11 +213,22 @@ mod win32 {
         ) -> i32;
     }
 
+    const MONITORINFOF_PRIMARY: u32 = 1;
+
     const MDT_EFFECTIVE_DPI: u32 = 0;
     const MDT_ANGULAR_DPI: u32 = 1;
     const MDT_RAW_DPI: u32 = 2;
 
     const DEVICE_SCALE_FACTOR_INVALID: u32 = 0;
+
+    const WS_CAPTION: u32 = 0x00C00000;
+    const WS_SYSMENU: u32 = 0x00080000;
+    const WS_MINIMIZEBOX: u32 = 0x00020000;
+
+    const CW_USEDEFAULT: i32 = 0x80000000u32 as i32;
+
+    const SW_HIDE: i32 = 0;
+    const SW_SHOW: i32 = 5;
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
@@ -209,6 +255,32 @@ mod win32 {
             res.cbSize = mem::size_of::<Self>() as u32;
             res
         }
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct WNDCLASSW {
+        style      : u32,
+        wnd_proc   : Option<extern "system" fn(*mut c_void, u32, u32, i32) -> i32>,
+        cls_extra  : i32,
+        wnd_extra  : i32,
+        hinstance  : *mut c_void,
+        hicon      : *mut c_void,
+        hcursor    : *mut c_void,
+        hbackground: *mut c_void,
+        menu_name  : *const u16,
+        class_name : *const u16,
+    }
+
+    impl WNDCLASSW {
+        fn new() -> Self {
+            unsafe{ mem::zeroed() }
+        }
+    }
+
+    /// Converts the Rust &OsStr into a WinAPI `WCHAR` string.
+    fn to_wstring(s: &OsStr) -> Vec<u16> {
+        s.encode_wide().chain(Some(0).into_iter()).collect()
     }
 
     #[derive(Debug)]
@@ -299,9 +371,56 @@ mod win32 {
         hwnd: *mut c_void,
     }
 
+    impl Win32Window {
+        extern "system" fn wnd_proc(hwnd: *mut c_void, msg: u32, wparam: u32, lparam: i32) -> i32 {
+            unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) }
+        }
+    }
+
     impl WindowTrait for Win32Window {
         fn new() -> Self {
-            unimplemented!()
+            let hinstance = unsafe{ GetModuleHandleW(ptr::null_mut()) };
+            if hinstance.is_null() {
+                // TODO: Error handling
+                unimplemented!();
+            }
+
+            let class_name = to_wstring(OsStr::new("Cacti Window Class"));
+            let window_name = to_wstring(OsStr::new("Window Name"));
+
+            // Window class
+            let mut wndclass = WNDCLASSW::new();
+            wndclass.wnd_proc = Some(Self::wnd_proc);
+            wndclass.hinstance = hinstance;
+            wndclass.class_name = class_name.as_ptr();
+
+            let ret = unsafe{ RegisterClassW(&wndclass) };
+            if ret == 0 {
+                // TODO: Return error
+                unimplemented!();
+            }
+
+            // Window
+            let hwnd = unsafe{ CreateWindowExW(
+                0,
+                class_name.as_ptr(),
+                window_name.as_ptr(),
+                WS_CAPTION | WS_MINIMIZEBOX | WS_SYSMENU,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                hinstance,
+                ptr::null_mut()) };
+            if hwnd.is_null() {
+                // TODO: Return error
+                println!("aaa: {:?}", std::io::Error::last_os_error());
+                unimplemented!();
+            }
+
+            Self{ hwnd }
         }
 
         fn handle_ptr(&self) -> *const c_void { self.hwnd }
@@ -311,8 +430,13 @@ mod win32 {
             unimplemented!()
         }
 
-        fn set_visible(&self, vis: bool) {
+        fn outer_size(&self) -> (u32, u32) {
             unimplemented!()
+        }
+
+        fn set_visible(&self, vis: bool) {
+            let cmd = if vis { SW_SHOW } else { SW_HIDE };
+            unsafe{ ShowWindow(self.hwnd, cmd) };
         }
 
         fn set_title(&self, title: &str) -> bool {

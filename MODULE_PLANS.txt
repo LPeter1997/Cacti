@@ -13,6 +13,7 @@
     - resizability
     - positioning
     - fullscreen
+    - icons
 - 2D graphics
   - different backends
     - first just OpenGL, but have the abstraction

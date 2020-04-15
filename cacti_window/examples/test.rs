@@ -9,13 +9,13 @@ fn main() -> io::Result<()> {
     }
 
     let mut wnd = Window::new();
-    wnd.set_title("Hello, Window!");
-    wnd.set_position(100, 100);
-    wnd.set_inner_size(960, 540);
+    //wnd.set_title("Hello, Window!");
+    //wnd.set_position(100, 100);
+    //wnd.set_inner_size(960, 540);
     wnd.set_visible(true);
 
     wnd.run_event_loop(|| {
-
+        loop {}
     });
 
     Ok(())
