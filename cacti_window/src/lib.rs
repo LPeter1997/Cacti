@@ -100,6 +100,10 @@ impl Window {
         self.window.set_transparency(t)
     }
 
+    pub fn set_fullscreen(&mut self, fs: bool) -> bool {
+        self.window.set_fullscreen(fs)
+    }
+
     pub fn run_event_loop<F>(&mut self, mut f: F) where F: FnMut() {
         self.window.run_event_loop(f);
     }
@@ -143,6 +147,7 @@ trait WindowTrait: Sized {
     fn set_inner_size(&mut self, w: u32, h: u32) -> bool;
     fn set_pinned(&mut self, p: bool) -> bool;
     fn set_transparency(&mut self, t: f64) -> bool;
+    fn set_fullscreen(&mut self, fs: bool) -> bool;
 
     fn run_event_loop<F>(&mut self, f: F) where F: FnMut();
 }
@@ -265,6 +270,28 @@ mod win32 {
             alpha: u8,
             flags: u32,
         ) -> i32;
+
+        fn GetWindowRect(
+            hwnd: *mut c_void,
+            rect: *mut RECT,
+        ) -> i32;
+
+        fn SendMessageW(
+            hwnd: *mut c_void,
+            msg: u32,
+            wparam: u32,
+            lparam: i32,
+        ) -> i32;
+
+        fn MonitorFromWindow(
+            hwnd: *mut c_void,
+            flags: u32,
+        ) -> *mut c_void;
+
+        fn GetWindowPlacement(
+            hwnd: *mut c_void,
+            placement: *mut WINDOWPLACEMENT,
+        ) -> i32;
     }
 
     #[link(name = "shcore")]
@@ -301,10 +328,15 @@ mod win32 {
         | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
 
     const WS_EX_LAYERED: u32 = 0x00080000;
+    const WS_EX_DLGMODALFRAME: u32 = 0x00000001;
+    const WS_EX_WINDOWEDGE: u32 = 0x00000100;
+    const WS_EX_CLIENTEDGE: u32 = 0x00000200;
+    const WS_EX_STATICEDGE: u32 = 0x00020000;
 
     const CW_USEDEFAULT: i32 = 0x80000000u32 as i32;
 
     const SW_HIDE: i32 = 0;
+    const SW_MAXIMIZE: i32 = 3;
     const SW_SHOW: i32 = 5;
 
     const HWND_TOP: *mut c_void = 0 as *mut c_void;
@@ -392,6 +424,26 @@ mod win32 {
     impl MSG {
         fn new() -> Self {
             unsafe{ mem::zeroed() }
+        }
+    }
+
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy)]
+    struct WINDOWPLACEMENT {
+        length: u32,
+        flags: u32,
+        show: u32,
+        min: POINT,
+        max: POINT,
+        normal_pos: RECT,
+        device: RECT,
+    }
+
+    impl WINDOWPLACEMENT {
+        fn new() -> Self {
+            let mut res: Self = unsafe{ mem::zeroed() };
+            res.length = mem::size_of::<Self>() as u32;
+            res
         }
     }
 
@@ -483,9 +535,18 @@ mod win32 {
         }
     }
 
+    #[derive(Debug, Clone, Copy)]
+    struct HwndState {
+        maximized: bool,
+        style: u32,
+        exstyle: u32,
+        rect: RECT,
+    }
+
     #[derive(Debug)]
     pub struct Win32Window {
         hwnd: *mut c_void,
+        windowed: Option<HwndState>,
     }
 
     impl Win32Window {
@@ -537,7 +598,10 @@ mod win32 {
                 unimplemented!();
             }
 
-            Self{ hwnd }
+            Self{
+                hwnd,
+                windowed: None,
+            }
         }
 
         fn handle_ptr(&self) -> *const c_void { self.hwnd }
@@ -622,6 +686,46 @@ mod win32 {
                 0,
                 b,
                 LWA_ALPHA) != 0 }
+        }
+
+        fn set_fullscreen(&mut self, fs: bool) -> bool {
+            const FLAGS: u32 = WS_CAPTION | WS_THICKFRAME;
+            const EXFLAGS: u32 = WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE
+                | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE;
+
+            if fs == self.windowed.is_some() {
+                // Already in desired state
+                return true;
+            }
+
+            if fs {
+                // Save windowed state
+                let mut placement = WINDOWPLACEMENT::new();
+                let ret = unsafe{ GetWindowPlacement(self.hwnd, &mut placement) };
+                if ret == 0 {
+                    return false;
+                }
+                let maximized = placement.show == SW_MAXIMIZE as u32;
+                let style = unsafe{ GetWindowLongA(self.hwnd, GWL_STYLE) } as u32;
+                let exstyle = unsafe{ GetWindowLongA(self.hwnd, GWL_EXSTYLE) } as u32;
+                let rect = placement.normal_pos;
+                self.windowed = Some(HwndState{ maximized, style, exstyle, rect });
+                // Go fullscreen
+                unsafe{
+                    SetWindowLongA(self.hwnd, GWL_STYLE, (style & !FLAGS) as i32);
+                    SetWindowLongA(self.hwnd, GWL_EXSTYLE, (exstyle & !EXFLAGS) as i32);
+                }
+                // TODO: Get monitor, stretch
+                unimplemented!();
+                true
+            }
+            else {
+                // Go windowed
+                unimplemented!();
+                // Restore state
+                unimplemented!();
+                self.windowed = None;
+            }
         }
 
         fn run_event_loop<F>(&mut self, mut f: F) where F: FnMut() {
