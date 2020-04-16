@@ -311,6 +311,8 @@ mod win32 {
 
     const MONITORINFOF_PRIMARY: u32 = 1;
 
+    const MONITOR_DEFAULTTONEAREST: u32 = 2;
+
     const MDT_EFFECTIVE_DPI: u32 = 0;
     const MDT_ANGULAR_DPI: u32 = 1;
     const MDT_RAW_DPI: u32 = 2;
@@ -346,6 +348,8 @@ mod win32 {
     const SWP_NOSIZE: u32 = 0x0001;
     const SWP_NOMOVE: u32 = 0x0002;
     const SWP_NOZORDER: u32 = 0x0004;
+    const SWP_NOACTIVATE: u32 = 0x0010;
+    const SWP_FRAMECHANGED: u32 = 0x0020;
 
     const GWL_STYLE: i32 = -16;
     const GWL_EXSTYLE: i32 = -20;
@@ -365,6 +369,23 @@ mod win32 {
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
+    struct MONITORINFO {
+        cbSize      : u32 ,
+        monitor_rect: RECT,
+        work_rect   : RECT,
+        flags       : u32 ,
+    }
+
+    impl MONITORINFO {
+        fn new() -> Self {
+            let mut res: Self = unsafe{ mem::zeroed() };
+            res.cbSize = mem::size_of::<Self>() as u32;
+            res
+        }
+    }
+
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy)]
     struct MONITORINFOEXW {
         cbSize      : u32 ,
         monitor_rect: RECT,
@@ -375,7 +396,7 @@ mod win32 {
 
     impl MONITORINFOEXW {
         fn new() -> Self {
-            let mut res: MONITORINFOEXW = unsafe{ mem::zeroed() };
+            let mut res: Self = unsafe{ mem::zeroed() };
             res.cbSize = mem::size_of::<Self>() as u32;
             res
         }
@@ -710,21 +731,51 @@ mod win32 {
                 let exstyle = unsafe{ GetWindowLongA(self.hwnd, GWL_EXSTYLE) } as u32;
                 let rect = placement.normal_pos;
                 self.windowed = Some(HwndState{ maximized, style, exstyle, rect });
-                // Go fullscreen
+                // Remove windowed styles
                 unsafe{
                     SetWindowLongA(self.hwnd, GWL_STYLE, (style & !FLAGS) as i32);
                     SetWindowLongA(self.hwnd, GWL_EXSTYLE, (exstyle & !EXFLAGS) as i32);
                 }
-                // TODO: Get monitor, stretch
-                unimplemented!();
-                true
+                // Stretch on current monitor
+                let monitor = unsafe{ MonitorFromWindow(self.hwnd, MONITOR_DEFAULTTONEAREST) };
+                let mut minfo = MONITORINFO::new();
+                let ret = unsafe{ GetMonitorInfoW(monitor, (&mut minfo as *mut MONITORINFO).cast()) };
+                if ret == 0 {
+                    return false;
+                }
+                let mrect = minfo.monitor_rect;
+                unsafe{ SetWindowPos(
+                    self.hwnd,
+                    HWND_TOP,
+                    mrect.left,
+                    mrect.top,
+                    mrect.right - mrect.left,
+                    mrect.bottom - mrect.top,
+                    SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED) != 0 }
             }
             else {
-                // Go windowed
-                unimplemented!();
                 // Restore state
-                unimplemented!();
-                self.windowed = None;
+                let state = self.windowed.take().unwrap();
+                unsafe{
+                    SetWindowLongA(self.hwnd, GWL_STYLE, state.style as i32);
+                    SetWindowLongA(self.hwnd, GWL_EXSTYLE, state.exstyle as i32);
+                }
+                let rect = state.rect;
+                let res = unsafe{ SetWindowPos(
+                    self.hwnd,
+                    HWND_TOP,
+                    rect.left,
+                    rect.top,
+                    rect.right - rect.left,
+                    rect.bottom - rect.top,
+                    SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED) };
+                if res == 0 {
+                    return false;
+                }
+                if state.maximized {
+                    unsafe{ ShowWindow(self.hwnd, SW_MAXIMIZE) };
+                }
+                true
             }
         }
 
