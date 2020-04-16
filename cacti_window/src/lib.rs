@@ -7,6 +7,7 @@ use std::ffi::c_void;
 //                                    API                                     //
 // ////////////////////////////////////////////////////////////////////////// //
 
+#[derive(Debug)]
 pub struct Monitor {
     monitor: MonitorImpl,
     info: MonitorInfo,
@@ -52,6 +53,7 @@ impl Monitor {
     }
 }
 
+#[derive(Debug)]
 pub struct Window {
     window: WindowImpl,
 }
@@ -104,9 +106,17 @@ impl Window {
         self.window.set_fullscreen(fs)
     }
 
-    pub fn run_event_loop<F>(&mut self, mut f: F) where F: FnMut() {
+    pub fn run_event_loop<F>(&mut self, mut f: F)
+        where F: FnMut(&mut EventLoop) {
         self.window.run_event_loop(f);
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EventLoop {
+    Wait,
+    Poll,
+    Stop,
 }
 
 // ////////////////////////////////////////////////////////////////////////// //
@@ -122,6 +132,7 @@ trait MonitorTrait: Sized {
     fn info(&self) -> io::Result<MonitorInfo>;
 }
 
+#[derive(Debug)]
 struct MonitorInfo {
     name    : Option<String>,
     position: (i32, i32),
@@ -149,7 +160,7 @@ trait WindowTrait: Sized {
     fn set_transparency(&mut self, t: f64) -> bool;
     fn set_fullscreen(&mut self, fs: bool) -> bool;
 
-    fn run_event_loop<F>(&mut self, f: F) where F: FnMut();
+    fn run_event_loop<F>(&mut self, f: F) where F: FnMut(&mut EventLoop);
 }
 
 // WinAPI implementation ///////////////////////////////////////////////////////
@@ -292,6 +303,8 @@ mod win32 {
             hwnd: *mut c_void,
             placement: *mut WINDOWPLACEMENT,
         ) -> i32;
+
+        fn PostQuitMessage(code: i32);
     }
 
     #[link(name = "shcore")]
@@ -779,12 +792,31 @@ mod win32 {
             }
         }
 
-        fn run_event_loop<F>(&mut self, mut f: F) where F: FnMut() {
+        fn run_event_loop<F>(&mut self, mut f: F)
+            where F: FnMut(&mut EventLoop) {
+            // TODO: Not call f here, but inside the wnd_proc to avoid the modal loop crap
             let mut msg = MSG::new();
+            let mut ev_loop = EventLoop::Poll;
             loop {
-                f();
-                let res = unsafe{ PeekMessageW(&mut msg, self.hwnd, 0, 0, PM_REMOVE) };
-                if res != 0 {
+                f(&mut ev_loop);
+                if ev_loop == EventLoop::Stop {
+                    unsafe{ PostQuitMessage(0) };
+                }
+
+                if ev_loop == EventLoop::Poll {
+                    let res = unsafe{ PeekMessageW(&mut msg, self.hwnd, 0, 0, PM_REMOVE) };
+                    if res != 0 {
+                        unsafe{
+                            TranslateMessage(&mut msg);
+                            DispatchMessageW(&mut msg);
+                        }
+                    }
+                }
+                else {
+                    let res = unsafe{ GetMessageW(&mut msg, self.hwnd, 0, 0) };
+                    if res == 0 {
+                        break;
+                    }
                     unsafe{
                         TranslateMessage(&mut msg);
                         DispatchMessageW(&mut msg);
