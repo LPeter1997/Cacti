@@ -119,6 +119,10 @@ pub enum EventLoop {
     Stop,
 }
 
+pub trait EventHandler {
+
+}
+
 // ////////////////////////////////////////////////////////////////////////// //
 //                               Implementation                               //
 // ////////////////////////////////////////////////////////////////////////// //
@@ -305,6 +309,13 @@ mod win32 {
         ) -> i32;
 
         fn PostQuitMessage(code: i32);
+
+        fn DestroyWindow(hwnd: *mut c_void) -> i32;
+
+        fn GetClientRect(
+            hwnd: *mut c_void,
+            rect: *mut RECT,
+        ) -> i32;
     }
 
     #[link(name = "shcore")]
@@ -378,6 +389,12 @@ mod win32 {
         top   : i32,
         right : i32,
         bottom: i32,
+    }
+
+    impl RECT {
+        fn new() -> Self {
+            unsafe{ mem::zeroed() }
+        }
     }
 
     #[repr(C)]
@@ -642,11 +659,15 @@ mod win32 {
         fn handle_mut_ptr(&mut self) -> *mut c_void { self.hwnd }
 
         fn inner_size(&self) -> (u32, u32) {
-            unimplemented!()
+            let mut rect = RECT::new();
+            unsafe{ GetClientRect(self.hwnd, &mut rect) };
+            ((rect.right - rect.left) as u32, (rect.bottom - rect.top) as u32)
         }
 
         fn outer_size(&self) -> (u32, u32) {
-            unimplemented!()
+            let mut rect = RECT::new();
+            unsafe{ GetWindowRect(self.hwnd, &mut rect) };
+            ((rect.right - rect.left) as u32, (rect.bottom - rect.top) as u32)
         }
 
         fn set_visible(&mut self, vis: bool) {
