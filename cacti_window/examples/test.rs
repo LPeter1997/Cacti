@@ -18,8 +18,8 @@ fn main() -> io::Result<()> {
     //wnd.set_transparency(0.5);
     wnd.set_fullscreen(true);
 
-    wnd.run_event_loop(|ev_loop| {
-        *ev_loop = EventLoop::Stop;
+    wnd.run_event_loop(|| {
+        println!("Runn");
     });
 
     Ok(())

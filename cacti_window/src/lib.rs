@@ -106,7 +106,7 @@ impl Window {
     }
 
     pub fn run_event_loop<F>(&mut self, f: F)
-        where F: FnMut() {
+        where F: FnMut() + 'static {
         self.window.run_event_loop(f);
     }
 }
@@ -153,7 +153,7 @@ trait WindowTrait: Sized {
     fn set_transparency(&mut self, t: f64) -> bool;
     fn set_fullscreen(&mut self, fs: bool) -> bool;
 
-    fn run_event_loop<F>(&mut self, f: F) where F: FnMut();
+    fn run_event_loop<F>(&mut self, f: F) where F: FnMut() + 'static;
 }
 
 // WinAPI implementation ///////////////////////////////////////////////////////
@@ -238,12 +238,12 @@ mod win32 {
             ex_style: u32,
         ) -> i32;
 
-        fn GetWindowLongA(
+        fn GetWindowLongW(
             hwnd: *mut c_void,
             index: i32,
         ) -> i32;
 
-        fn SetWindowLongA(
+        fn SetWindowLongW(
             hwnd: *mut c_void,
             index: i32,
             new: i32,
@@ -305,6 +305,17 @@ mod win32 {
             hwnd: *mut c_void,
             rect: *mut RECT,
         ) -> i32;
+
+        fn SetWindowLongPtrW(
+            hwnd: *mut c_void,
+            index: i32,
+            new: isize,
+        ) -> isize;
+
+        fn GetWindowLongPtrW(
+            hwnd: *mut c_void,
+            index: i32,
+        ) -> isize;
     }
 
     #[link(name = "shcore")]
@@ -366,6 +377,8 @@ mod win32 {
 
     const GWL_STYLE: i32 = -16;
     const GWL_EXSTYLE: i32 = -20;
+
+    const GWLP_USERDATA: i32 = -21;
 
     const PM_REMOVE: u32 = 0x0001;
 
@@ -582,6 +595,10 @@ mod win32 {
         rect: RECT,
     }
 
+    struct WndProcData {
+        func: Box<dyn FnMut()>,
+    }
+
     #[derive(Debug)]
     pub struct Win32Window {
         hwnd: *mut c_void,
@@ -590,6 +607,11 @@ mod win32 {
 
     impl Win32Window {
         extern "system" fn wnd_proc(hwnd: *mut c_void, msg: u32, wparam: u32, lparam: i32) -> i32 {
+            let data_ptr = unsafe{ GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut WndProcData;
+            let data = unsafe{ &mut *data_ptr };
+
+            (data.func)();
+
             unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) }
         }
     }
@@ -664,9 +686,9 @@ mod win32 {
 
         fn set_resizable(&mut self, res: bool) -> bool {
             const FLAGS: u32 = WS_MAXIMIZEBOX | WS_THICKFRAME;
-            let style = unsafe{ GetWindowLongA(self.hwnd, GWL_STYLE) } as u32;
+            let style = unsafe{ GetWindowLongW(self.hwnd, GWL_STYLE) } as u32;
             let newstyle = if res { style | FLAGS } else { style & !FLAGS };
-            unsafe{ SetWindowLongA(self.hwnd, GWL_STYLE, newstyle as i32) };
+            unsafe{ SetWindowLongW(self.hwnd, GWL_STYLE, newstyle as i32) };
             true
         }
 
@@ -687,8 +709,8 @@ mod win32 {
         }
 
         fn set_inner_size(&mut self, w: u32, h: u32) -> bool {
-            let style = unsafe{ GetWindowLongA(self.hwnd, GWL_STYLE) };
-            let exstyle = unsafe{ GetWindowLongA(self.hwnd, GWL_EXSTYLE) };
+            let style = unsafe{ GetWindowLongW(self.hwnd, GWL_STYLE) };
+            let exstyle = unsafe{ GetWindowLongW(self.hwnd, GWL_EXSTYLE) };
             let mut rect = RECT{
                 left: 0,
                 top: 0,
@@ -748,14 +770,14 @@ mod win32 {
                     return false;
                 }
                 let maximized = placement.show == SW_MAXIMIZE as u32;
-                let style = unsafe{ GetWindowLongA(self.hwnd, GWL_STYLE) } as u32;
-                let exstyle = unsafe{ GetWindowLongA(self.hwnd, GWL_EXSTYLE) } as u32;
+                let style = unsafe{ GetWindowLongW(self.hwnd, GWL_STYLE) } as u32;
+                let exstyle = unsafe{ GetWindowLongW(self.hwnd, GWL_EXSTYLE) } as u32;
                 let rect = placement.normal_pos;
                 self.windowed = Some(HwndState{ maximized, style, exstyle, rect });
                 // Remove windowed styles
                 unsafe{
-                    SetWindowLongA(self.hwnd, GWL_STYLE, (style & !FLAGS) as i32);
-                    SetWindowLongA(self.hwnd, GWL_EXSTYLE, (exstyle & !EXFLAGS) as i32);
+                    SetWindowLongW(self.hwnd, GWL_STYLE, (style & !FLAGS) as i32);
+                    SetWindowLongW(self.hwnd, GWL_EXSTYLE, (exstyle & !EXFLAGS) as i32);
                 }
                 // Stretch on current monitor
                 let monitor = unsafe{ MonitorFromWindow(self.hwnd, MONITOR_DEFAULTTONEAREST) };
@@ -778,8 +800,8 @@ mod win32 {
                 // Restore state
                 let state = self.windowed.take().unwrap();
                 unsafe{
-                    SetWindowLongA(self.hwnd, GWL_STYLE, state.style as i32);
-                    SetWindowLongA(self.hwnd, GWL_EXSTYLE, state.exstyle as i32);
+                    SetWindowLongW(self.hwnd, GWL_STYLE, state.style as i32);
+                    SetWindowLongW(self.hwnd, GWL_EXSTYLE, state.exstyle as i32);
                 }
                 let rect = state.rect;
                 let res = unsafe{ SetWindowPos(
@@ -801,12 +823,16 @@ mod win32 {
         }
 
         fn run_event_loop<F>(&mut self, mut f: F)
-            where F: FnMut() {
+            where F: FnMut() + 'static {
+
+            let mut data = WndProcData{
+                func: Box::new(f),
+            };
+            let data_ptr = &mut data as *mut WndProcData;
+            unsafe{ SetWindowLongPtrW(self.hwnd, GWLP_USERDATA, data_ptr as isize) };
+
             let mut msg = MSG::new();
             loop {
-                // TODO: Not call f here, but inside the wnd_proc to avoid the modal loop crap
-                f();
-
                 if /*ev_loop == EventLoop::Poll*/ true {
                     let res = unsafe{ PeekMessageW(&mut msg, self.hwnd, 0, 0, PM_REMOVE) };
                     if res != 0 {
