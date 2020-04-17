@@ -23,13 +23,8 @@ impl Monitor {
         ).collect()
     }
 
-    pub fn handle_ptr(&self) -> *const c_void {
-        self.monitor.handle_ptr()
-    }
-
-    pub fn handle_mut_ptr(&mut self) -> *mut c_void {
-        self.monitor.handle_mut_ptr()
-    }
+    pub fn handle_ptr(&self) -> *const c_void { self.monitor.handle_ptr() }
+    pub fn handle_mut_ptr(&mut self) -> *mut c_void { self.monitor.handle_ptr() }
 
     pub fn name(&self) -> Option<&str> {
         self.info.name.as_ref().map(|n| n.as_str())
@@ -68,7 +63,7 @@ impl Window {
 
     pub fn id(&self) -> WindowId { WindowId(self.handle_ptr()) }
     pub fn handle_ptr(&self) -> *const c_void { self.window.handle_ptr() }
-    pub fn handle_mut_ptr(&mut self) -> *mut c_void { self.window.handle_mut_ptr() }
+    pub fn handle_mut_ptr(&mut self) -> *mut c_void { self.window.handle_ptr() }
 
     pub fn inner_size(&self) -> (u32, u32) {
         self.window.inner_size()
@@ -110,7 +105,7 @@ impl Window {
         self.window.set_fullscreen(fs)
     }
 
-    pub fn run_event_loop<F>(&mut self, mut f: F)
+    pub fn run_event_loop<F>(&mut self, f: F)
         where F: FnMut() {
         self.window.run_event_loop(f);
     }
@@ -126,8 +121,7 @@ pub struct WindowId(*const c_void);
 trait MonitorTrait: Sized {
     fn all_monitors() -> Vec<Self>;
 
-    fn handle_ptr(&self) -> *const c_void;
-    fn handle_mut_ptr(&mut self) -> *mut c_void;
+    fn handle_ptr(&self) -> *mut c_void;
 
     fn info(&self) -> io::Result<MonitorInfo>;
 }
@@ -145,8 +139,7 @@ struct MonitorInfo {
 trait WindowTrait: Sized {
     fn new() -> Self;
 
-    fn handle_ptr(&self) -> *const c_void;
-    fn handle_mut_ptr(&mut self) -> *mut c_void;
+    fn handle_ptr(&self) -> *mut c_void;
 
     fn inner_size(&self) -> (u32, u32);
     fn outer_size(&self) -> (u32, u32);
@@ -528,8 +521,7 @@ mod win32 {
             monitors
         }
 
-        fn handle_ptr(&self) -> *const c_void { self.hmonitor }
-        fn handle_mut_ptr(&mut self) -> *mut c_void { self.hmonitor }
+        fn handle_ptr(&self) -> *mut c_void { self.hmonitor }
 
         fn info(&self) -> io::Result<MonitorInfo> {
             // Get MONITORINFOEXW
@@ -651,8 +643,7 @@ mod win32 {
             }
         }
 
-        fn handle_ptr(&self) -> *const c_void { self.hwnd }
-        fn handle_mut_ptr(&mut self) -> *mut c_void { self.hwnd }
+        fn handle_ptr(&self) -> *mut c_void { self.hwnd }
 
         fn inner_size(&self) -> (u32, u32) {
             let mut rect = RECT::new();
