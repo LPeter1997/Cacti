@@ -177,8 +177,8 @@ mod win32 {
     extern "system" {
         fn EnumDisplayMonitors(
             hdc: *mut c_void,
-            clip_rect: *mut c_void,
-            proc: extern "system" fn(*mut c_void, *mut c_void, *mut c_void, isize) -> i32,
+            clip_rect: *mut RECT,
+            proc: Option<extern "system" fn(*mut c_void, *mut c_void, *mut RECT, isize) -> i32>,
             data: isize,
         ) -> i32;
 
@@ -212,9 +212,9 @@ mod win32 {
         fn DefWindowProcW(
             hwnd: *mut c_void,
             msg: u32,
-            wparam: u32,
-            lparam: i32,
-        ) -> i32;
+            wparam: usize,
+            lparam: isize,
+        ) -> isize;
 
         fn SetWindowTextW(
             hwnd: *mut c_void,
@@ -283,9 +283,9 @@ mod win32 {
         fn SendMessageW(
             hwnd: *mut c_void,
             msg: u32,
-            wparam: u32,
-            lparam: i32,
-        ) -> i32;
+            wparam: usize,
+            lparam: isize,
+        ) -> isize;
 
         fn MonitorFromWindow(
             hwnd: *mut c_void,
@@ -438,7 +438,7 @@ mod win32 {
     #[derive(Clone, Copy)]
     struct WNDCLASSW {
         style      : u32,
-        wnd_proc   : Option<extern "system" fn(*mut c_void, u32, u32, i32) -> i32>,
+        wnd_proc   : Option<extern "system" fn(*mut c_void, u32, usize, isize) -> isize>,
         cls_extra  : i32,
         wnd_extra  : i32,
         hinstance  : *mut c_void,
@@ -467,8 +467,8 @@ mod win32 {
     struct MSG {
         hwnd: *mut c_void,
         message: u32,
-        wparam: u32,
-        lparam: i32,
+        wparam: usize,
+        lparam: isize,
         time: u32,
         point: POINT,
         private: u32,
@@ -514,7 +514,7 @@ mod win32 {
         extern "system" fn monitor_enum_proc(
             hmonitor: *mut c_void,
             _hdc: *mut c_void,
-            _lprect: *mut c_void,
+            _lprect: *mut RECT,
             lparam: isize
         ) -> i32 {
             let monitors = unsafe{ &mut *(lparam as *mut Vec<Self>) };
@@ -529,7 +529,7 @@ mod win32 {
             unsafe{ EnumDisplayMonitors(
                 ptr::null_mut(),
                 ptr::null_mut(),
-                Self::monitor_enum_proc,
+                Some(Self::monitor_enum_proc),
                 &mut monitors as *mut Vec<Self> as isize) };
             monitors
         }
@@ -606,11 +606,12 @@ mod win32 {
     }
 
     impl Win32Window {
-        extern "system" fn wnd_proc(hwnd: *mut c_void, msg: u32, wparam: u32, lparam: i32) -> i32 {
+        extern "system" fn wnd_proc(hwnd: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> isize {
             let data_ptr = unsafe{ GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut WndProcData;
-            let data = unsafe{ &mut *data_ptr };
-
-            (data.func)();
+            if !data_ptr.is_null() {
+                let data = unsafe{ &mut *data_ptr };
+                (data.func)();
+            }
 
             unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) }
         }
@@ -658,6 +659,12 @@ mod win32 {
                 println!("aaa: {:?}", std::io::Error::last_os_error());
                 unimplemented!();
             }
+
+            unsafe{ SetLayeredWindowAttributes(
+                hwnd,
+                0,
+                255,
+                LWA_ALPHA) };
 
             Self{
                 hwnd,
@@ -822,7 +829,7 @@ mod win32 {
             }
         }
 
-        fn run_event_loop<F>(&mut self, mut f: F)
+        fn run_event_loop<F>(&mut self, f: F)
             where F: FnMut() + 'static {
 
             let mut data = WndProcData{

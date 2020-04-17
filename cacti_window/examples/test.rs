@@ -15,8 +15,8 @@ fn main() -> io::Result<()> {
     wnd.set_visible(true);
     //wnd.set_resizable(false);
     //wnd.set_pinned(true);
-    //wnd.set_transparency(0.5);
-    wnd.set_fullscreen(true);
+    //wnd.set_transparency(1.0);
+    //wnd.set_fullscreen(true);
 
     wnd.run_event_loop(|| {
         println!("Runn");
