@@ -19,9 +19,10 @@ fn main() -> io::Result<()> {
     //wnd.set_fullscreen(true);
 
     wnd.run_event_loop(|eloop, e| {
+        println!("Event: {:?}", e);
         match e {
             Event::WindowEvent{ window_id: _, event: WindowEvent::CloseRequested } => {
-                //eloop.quit(0);
+                eloop.quit(0);
             },
             _ => {},
         }

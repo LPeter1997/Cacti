@@ -131,6 +131,7 @@ pub enum WindowEvent {
     Created,
     CloseRequested,
     Closed,
+    FocusChanged(bool),
 }
 
 // ////////////////////////////////////////////////////////////////////////// //
@@ -408,6 +409,8 @@ mod win32 {
     const WM_CLOSE: u32 = 0x0010;
     const WM_QUIT: u32 = 0x0012;
     const WM_DESTROY: u32 = 0x0002;
+    const WM_KILLFOCUS: u32 = 0x0008;
+    const WM_SETFOCUS: u32 = 0x0007;
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
@@ -703,6 +706,14 @@ mod win32 {
                     push_event(Event::WindowEvent{ window_id, event: WindowEvent::Closed });
                     unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) }
                 },
+                WM_KILLFOCUS => {
+                    push_event(Event::WindowEvent{ window_id, event: WindowEvent::FocusChanged(false) });
+                    0
+                },
+                WM_SETFOCUS => {
+                    push_event(Event::WindowEvent{ window_id, event: WindowEvent::FocusChanged(true) });
+                    0
+                }
                 _ =>  unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) },
             };
 
