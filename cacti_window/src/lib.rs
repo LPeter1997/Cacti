@@ -125,7 +125,8 @@ pub enum Event {
 #[derive(Debug)]
 pub enum WindowEvent {
     Created,
-    Destroyed,
+    CloseRequested,
+    Closed,
 }
 
 // ////////////////////////////////////////////////////////////////////////// //
@@ -399,6 +400,7 @@ mod win32 {
     const LWA_ALPHA: u32 = 0x00000002;
 
     const WM_CREATE: u32 = 0x0001;
+    const WM_CLOSE: u32 = 0x0010;
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
@@ -651,6 +653,14 @@ mod win32 {
         extern "system" fn wnd_proc(hwnd: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> isize {
             let window_id = WindowId(hwnd);
 
+            let data_ptr = unsafe{ GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut WndProcData;
+            let mut push_event = |e: Event| {
+                if !data_ptr.is_null() {
+                    let data = unsafe{ &mut *data_ptr };
+                    data.events.push(e);
+                }
+            };
+
             let result = match msg {
                 WM_CREATE => {
                     // Pass the user pointer to the window
@@ -660,6 +670,10 @@ mod win32 {
                     let data: &mut WndProcData = unsafe{ &mut *crea.param.cast() };
                     // Push creation event
                     data.events.push(Event::WindowEvent{ window_id, event: WindowEvent::Created });
+                    0
+                },
+                WM_CLOSE => {
+                    push_event(Event::WindowEvent{ window_id, event: WindowEvent::CloseRequested });
                     0
                 },
                 _ =>  unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) },
@@ -705,7 +719,7 @@ mod win32 {
             }
 
             // User data
-            let mut user_data = Box::leak(Box::new(WndProcData::new()));
+            let user_data = Box::leak(Box::new(WndProcData::new()));
 
             // Window
             let hwnd = unsafe{ CreateWindowExW(
