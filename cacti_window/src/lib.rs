@@ -10,6 +10,11 @@ use std::ffi::c_void;
 // TODO: Solve coordinates problem
 // Strong types for coords?
 
+// TODO: Right now this model doesn't make sense. There can be only one window!
+// We need to allow multiple windows! But the current loop just sucks!
+// Also it would be nicer to be able to modify the window itself in the loop and
+// not have a separate thingy for that...
+
 #[derive(Debug)]
 pub struct Monitor {
     monitor: MonitorImpl,
