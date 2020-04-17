@@ -7,6 +7,9 @@ use std::ffi::c_void;
 //                                    API                                     //
 // ////////////////////////////////////////////////////////////////////////// //
 
+// TODO: Solve coordinates problem
+// Strong types for coords?
+
 #[derive(Debug)]
 pub struct Monitor {
     monitor: MonitorImpl,
@@ -63,6 +66,7 @@ impl Window {
         Self{ window: WindowImpl::new() }
     }
 
+    pub fn id(&self) -> WindowId { WindowId(self.handle_ptr()) }
     pub fn handle_ptr(&self) -> *const c_void { self.window.handle_ptr() }
     pub fn handle_mut_ptr(&mut self) -> *mut c_void { self.window.handle_mut_ptr() }
 
@@ -107,21 +111,13 @@ impl Window {
     }
 
     pub fn run_event_loop<F>(&mut self, mut f: F)
-        where F: FnMut(&mut EventLoop) {
+        where F: FnMut() {
         self.window.run_event_loop(f);
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum EventLoop {
-    Wait,
-    Poll,
-    Stop,
-}
-
-pub trait EventHandler {
-
-}
+pub struct WindowId(*const c_void);
 
 // ////////////////////////////////////////////////////////////////////////// //
 //                               Implementation                               //
@@ -164,7 +160,7 @@ trait WindowTrait: Sized {
     fn set_transparency(&mut self, t: f64) -> bool;
     fn set_fullscreen(&mut self, fs: bool) -> bool;
 
-    fn run_event_loop<F>(&mut self, f: F) where F: FnMut(&mut EventLoop);
+    fn run_event_loop<F>(&mut self, f: F) where F: FnMut();
 }
 
 // WinAPI implementation ///////////////////////////////////////////////////////
@@ -814,17 +810,13 @@ mod win32 {
         }
 
         fn run_event_loop<F>(&mut self, mut f: F)
-            where F: FnMut(&mut EventLoop) {
-            // TODO: Not call f here, but inside the wnd_proc to avoid the modal loop crap
+            where F: FnMut() {
             let mut msg = MSG::new();
-            let mut ev_loop = EventLoop::Poll;
             loop {
-                f(&mut ev_loop);
-                if ev_loop == EventLoop::Stop {
-                    unsafe{ PostQuitMessage(0) };
-                }
+                // TODO: Not call f here, but inside the wnd_proc to avoid the modal loop crap
+                f();
 
-                if ev_loop == EventLoop::Poll {
+                if /*ev_loop == EventLoop::Poll*/ true {
                     let res = unsafe{ PeekMessageW(&mut msg, self.hwnd, 0, 0, PM_REMOVE) };
                     if res != 0 {
                         unsafe{
