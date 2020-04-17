@@ -106,9 +106,13 @@ impl Window {
     }
 
     pub fn run_event_loop<F>(&mut self, f: F)
-        where F: FnMut(Event) + 'static {
+        where F: FnMut(&mut dyn EventLoop, Event) + 'static {
         self.window.run_event_loop(f);
     }
+}
+
+pub trait EventLoop {
+    fn quit(&mut self, code: i32);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -168,7 +172,8 @@ trait WindowTrait: Sized {
     fn set_transparency(&mut self, t: f64) -> bool;
     fn set_fullscreen(&mut self, fs: bool) -> bool;
 
-    fn run_event_loop<F>(&mut self, f: F) where F: FnMut(Event) + 'static;
+    fn run_event_loop<F>(&mut self, f: F)
+        where F: FnMut(&mut dyn EventLoop, Event) + 'static;
 }
 
 // WinAPI implementation ///////////////////////////////////////////////////////
@@ -401,6 +406,8 @@ mod win32 {
 
     const WM_CREATE: u32 = 0x0001;
     const WM_CLOSE: u32 = 0x0010;
+    const WM_QUIT: u32 = 0x0012;
+    const WM_DESTROY: u32 = 0x0002;
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
@@ -630,8 +637,9 @@ mod win32 {
     }
 
     struct WndProcData {
-        func: Option<Box<dyn FnMut(Event)>>,
+        func: Option<Box<dyn FnMut(&mut dyn EventLoop, Event)>>,
         events: Vec<Event>,
+        quit: Option<i32>,
     }
 
     impl WndProcData {
@@ -639,7 +647,20 @@ mod win32 {
             Self{
                 func: None,
                 events: Vec::new(),
+                quit: None,
             }
+        }
+    }
+
+    struct Win32EventLoop {
+        hwnd: *mut c_void,
+        quit: Option<i32>,
+    }
+
+    impl EventLoop for Win32EventLoop {
+        fn quit(&mut self, code: i32) {
+            unsafe{ DestroyWindow(self.hwnd) };
+            self.quit = Some(code);
         }
     }
 
@@ -652,9 +673,11 @@ mod win32 {
     impl Win32Window {
         extern "system" fn wnd_proc(hwnd: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> isize {
             let window_id = WindowId(hwnd);
+            let mut eloop = Win32EventLoop{ hwnd, quit: None };
+            let mut destroy = false;
 
             let data_ptr = unsafe{ GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut WndProcData;
-            let mut push_event = |e: Event| {
+            let push_event = |e: Event| {
                 if !data_ptr.is_null() {
                     let data = unsafe{ &mut *data_ptr };
                     data.events.push(e);
@@ -676,6 +699,10 @@ mod win32 {
                     push_event(Event::WindowEvent{ window_id, event: WindowEvent::CloseRequested });
                     0
                 },
+                WM_DESTROY => {
+                    push_event(Event::WindowEvent{ window_id, event: WindowEvent::Closed });
+                    unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) }
+                },
                 _ =>  unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) },
             };
 
@@ -686,8 +713,14 @@ mod win32 {
                 if data.func.is_some() {
                     let func = data.func.as_mut().unwrap();
                     for e in data.events.drain(..) {
-                        func(e);
+                        func(&mut eloop, e);
                     }
+                }
+                if eloop.quit.is_some() {
+                    data.quit = eloop.quit;
+                }
+                if destroy {
+                    let _user: Box<WndProcData> = unsafe{ Box::from_raw(data_ptr.cast()) };
                 }
             }
 
@@ -911,7 +944,7 @@ mod win32 {
         }
 
         fn run_event_loop<F>(&mut self, f: F)
-            where F: FnMut(Event) + 'static {
+            where F: FnMut(&mut dyn EventLoop, Event) + 'static {
 
             let data_ptr = unsafe{ GetWindowLongPtrW(self.hwnd, GWLP_USERDATA) } as *mut WndProcData;
             assert!(!data_ptr.is_null());
@@ -931,23 +964,17 @@ mod win32 {
                 }
                 else {
                     let res = unsafe{ GetMessageW(&mut msg, self.hwnd, 0, 0) };
-                    if res == 0 {
-                        break;
-                    }
-                    unsafe{
-                        TranslateMessage(&mut msg);
-                        DispatchMessageW(&mut msg);
+                    if res != 0 {
+                        unsafe{
+                            TranslateMessage(&mut msg);
+                            DispatchMessageW(&mut msg);
+                        }
                     }
                 }
+                if data.quit.is_some() {
+                    break;
+                }
             }
-        }
-    }
-
-    impl Drop for Win32Window {
-        fn drop(&mut self) {
-            let data_ptr = unsafe{ GetWindowLongPtrW(self.hwnd, GWLP_USERDATA) } as *mut WndProcData;
-            assert!(!data_ptr.is_null());
-            let _user: Box<WndProcData> = unsafe{ Box::from_raw(data_ptr.cast()) };
         }
     }
 }

@@ -18,8 +18,13 @@ fn main() -> io::Result<()> {
     //wnd.set_transparency(1.0);
     //wnd.set_fullscreen(true);
 
-    wnd.run_event_loop(|e| {
-        println!("{:?}", e);
+    wnd.run_event_loop(|eloop, e| {
+        match e {
+            Event::WindowEvent{ window_id: _, event: WindowEvent::CloseRequested } => {
+                //eloop.quit(0);
+            },
+            _ => {},
+        }
     });
 
     Ok(())
