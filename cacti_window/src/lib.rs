@@ -704,6 +704,7 @@ mod win32 {
                 },
                 WM_DESTROY => {
                     push_event(Event::WindowEvent{ window_id, event: WindowEvent::Closed });
+                    destroy = true;
                     unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) }
                 },
                 WM_KILLFOCUS => {
