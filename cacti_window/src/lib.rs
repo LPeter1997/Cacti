@@ -106,13 +106,27 @@ impl Window {
     }
 
     pub fn run_event_loop<F>(&mut self, f: F)
-        where F: FnMut() + 'static {
+        where F: FnMut(Event) + 'static {
         self.window.run_event_loop(f);
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WindowId(*const c_void);
+
+#[derive(Debug)]
+pub enum Event {
+    WindowEvent{
+        window_id: WindowId,
+        event: WindowEvent,
+    },
+}
+
+#[derive(Debug)]
+pub enum WindowEvent {
+    Created,
+    Destroyed,
+}
 
 // ////////////////////////////////////////////////////////////////////////// //
 //                               Implementation                               //
@@ -153,7 +167,7 @@ trait WindowTrait: Sized {
     fn set_transparency(&mut self, t: f64) -> bool;
     fn set_fullscreen(&mut self, fs: bool) -> bool;
 
-    fn run_event_loop<F>(&mut self, f: F) where F: FnMut() + 'static;
+    fn run_event_loop<F>(&mut self, f: F) where F: FnMut(Event) + 'static;
 }
 
 // WinAPI implementation ///////////////////////////////////////////////////////
@@ -384,6 +398,8 @@ mod win32 {
 
     const LWA_ALPHA: u32 = 0x00000002;
 
+    const WM_CREATE: u32 = 0x0001;
+
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
     struct RECT {
@@ -500,6 +516,22 @@ mod win32 {
         }
     }
 
+    #[repr(C)]
+    struct CREATESTRUCTW {
+        param: *mut c_void,
+        hinstance: *mut c_void,
+        menu: *mut c_void,
+        parent: *mut c_void,
+        height: i32,
+        width: i32,
+        y: i32,
+        x: i32,
+        style: i32,
+        name: *const u16,
+        class: *const u16,
+        exstyle: u32,
+    }
+
     /// Converts the Rust &OsStr into a WinAPI `WCHAR` string.
     fn to_wstring(s: &OsStr) -> Vec<u16> {
         s.encode_wide().chain(Some(0).into_iter()).collect()
@@ -596,7 +628,17 @@ mod win32 {
     }
 
     struct WndProcData {
-        func: Box<dyn FnMut()>,
+        func: Option<Box<dyn FnMut(Event)>>,
+        events: Vec<Event>,
+    }
+
+    impl WndProcData {
+        fn new() -> Self {
+            Self{
+                func: None,
+                events: Vec::new(),
+            }
+        }
     }
 
     #[derive(Debug)]
@@ -607,13 +649,35 @@ mod win32 {
 
     impl Win32Window {
         extern "system" fn wnd_proc(hwnd: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> isize {
+            let window_id = WindowId(hwnd);
+
+            let result = match msg {
+                WM_CREATE => {
+                    // Pass the user pointer to the window
+                    let crea = lparam as *const CREATESTRUCTW;
+                    let crea = unsafe{ &*crea };
+                    unsafe{ SetWindowLongPtrW(hwnd, GWLP_USERDATA, crea.param as isize) };
+                    let data: &mut WndProcData = unsafe{ &mut *crea.param.cast() };
+                    // Push creation event
+                    data.events.push(Event::WindowEvent{ window_id, event: WindowEvent::Created });
+                    0
+                },
+                _ =>  unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) },
+            };
+
+            // Transfer to user
             let data_ptr = unsafe{ GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut WndProcData;
             if !data_ptr.is_null() {
                 let data = unsafe{ &mut *data_ptr };
-                (data.func)();
+                if data.func.is_some() {
+                    let func = data.func.as_mut().unwrap();
+                    for e in data.events.drain(..) {
+                        func(e);
+                    }
+                }
             }
 
-            unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) }
+            result
         }
     }
 
@@ -640,6 +704,9 @@ mod win32 {
                 unimplemented!();
             }
 
+            // User data
+            let mut user_data = Box::leak(Box::new(WndProcData::new()));
+
             // Window
             let hwnd = unsafe{ CreateWindowExW(
                 WS_EX_LAYERED,
@@ -653,7 +720,7 @@ mod win32 {
                 ptr::null_mut(),
                 ptr::null_mut(),
                 hinstance,
-                ptr::null_mut()) };
+                (user_data as *mut WndProcData).cast()) };
             if hwnd.is_null() {
                 // TODO: Return error
                 println!("aaa: {:?}", std::io::Error::last_os_error());
@@ -830,13 +897,12 @@ mod win32 {
         }
 
         fn run_event_loop<F>(&mut self, f: F)
-            where F: FnMut() + 'static {
+            where F: FnMut(Event) + 'static {
 
-            let mut data = WndProcData{
-                func: Box::new(f),
-            };
-            let data_ptr = &mut data as *mut WndProcData;
-            unsafe{ SetWindowLongPtrW(self.hwnd, GWLP_USERDATA, data_ptr as isize) };
+            let data_ptr = unsafe{ GetWindowLongPtrW(self.hwnd, GWLP_USERDATA) } as *mut WndProcData;
+            assert!(!data_ptr.is_null());
+            let data = unsafe{ &mut *data_ptr };
+            data.func = Some(Box::new(f));
 
             let mut msg = MSG::new();
             loop {
@@ -860,6 +926,14 @@ mod win32 {
                     }
                 }
             }
+        }
+    }
+
+    impl Drop for Win32Window {
+        fn drop(&mut self) {
+            let data_ptr = unsafe{ GetWindowLongPtrW(self.hwnd, GWLP_USERDATA) } as *mut WndProcData;
+            assert!(!data_ptr.is_null());
+            let _user: Box<WndProcData> = unsafe{ Box::from_raw(data_ptr.cast()) };
         }
     }
 }
