@@ -66,10 +66,6 @@ impl EventLoop {
         self.0.add_window(&wnd.0);
     }
 
-    pub fn quit(&mut self, code: u32) {
-        self.0.quit(code);
-    }
-
     pub fn run<F>(&mut self, f: F) where F: FnMut(Event) + 'static {
         self.0.run(f);
     }
@@ -80,6 +76,8 @@ pub struct Window(WindowImpl);
 
 impl Window {
     pub fn new() -> Self { Self(WindowImpl::new()) }
+
+    pub fn close(&mut self) { self.0.close(); }
 
     pub fn id(&self) -> WindowId { WindowId(self.handle_ptr()) }
     pub fn handle_ptr(&self) -> *const c_void { self.0.handle_ptr() }
@@ -128,6 +126,13 @@ impl Window {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WindowId(*const c_void);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlFlow {
+    Poll,
+    Wait,
+    Exit,
+}
 
 #[derive(Debug)]
 pub enum Event {
@@ -178,6 +183,8 @@ trait EventLoopTrait {
 
 trait WindowTrait: Sized {
     fn new() -> Self;
+
+    fn close(&mut self);
 
     fn handle_ptr(&self) -> *mut c_void;
 
