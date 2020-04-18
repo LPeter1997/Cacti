@@ -189,6 +189,9 @@ struct RECT {
 
 impl RECT {
     fn new() -> Self { unsafe{ mem::zeroed() } }
+
+    fn width(&self) -> i32 { self.right - self.left }
+    fn height(&self) -> i32 { self.bottom - self.top }
 }
 
 #[repr(C)]
@@ -323,7 +326,7 @@ impl Win32Monitor {
         hmonitor: *mut c_void,
         _hdc: *mut c_void,
         _lprect: *mut RECT,
-        lparam: isize
+        lparam: isize,
     ) -> i32 {
         let monitors = unsafe{ &mut *(lparam as *mut Vec<Self>) };
         monitors.push(Self{ hmonitor });
@@ -361,11 +364,7 @@ impl MonitorTrait for Win32Monitor {
         // Get DPI
         let mut dpix = 0u32;
         let mut dpiy = 0u32;
-        let ret = unsafe{ GetDpiForMonitor(
-            self.hmonitor,
-            MDT_RAW_DPI,
-            &mut dpix,
-            &mut dpiy) };
+        let ret = unsafe{ GetDpiForMonitor(self.hmonitor, MDT_RAW_DPI, &mut dpix, &mut dpiy) };
         if ret != 0 {
             // TODO: Return error
             unimplemented!();
@@ -387,11 +386,32 @@ impl MonitorTrait for Win32Monitor {
         Ok(MonitorInfo{
             name: Some(name),
             position: (rect.left, rect.top),
-            size: ((rect.right - rect.left) as u32, (rect.bottom - rect.top) as u32),
+            size: (rect.width() as u32, rect.height() as u32),
             dpi: (dpix as f64, dpiy as f64),
             scale,
             primary,
         })
+    }
+}
+
+#[derive(Debug)]
+pub struct Win32EventLoop {}
+
+impl EventLoopTrait for Win32EventLoop {
+    fn new() -> Self {
+        Self{}
+    }
+
+    fn add_window(&mut self, wnd: &Win32Window) {
+        unimplemented!()
+    }
+
+    fn quit(&mut self, code: u32) {
+        unimplemented!()
+    }
+
+    fn run<F>(&mut self, f: F) where F: FnMut(Event) {
+        unimplemented!()
     }
 }
 
@@ -403,8 +423,6 @@ struct HwndState {
     rect: RECT,
 }
 
-pub struct Win32EventLoop {}
-
 #[derive(Debug)]
 pub struct Win32Window {
     hwnd: *mut c_void,
@@ -413,68 +431,7 @@ pub struct Win32Window {
 
 impl Win32Window {
     extern "system" fn wnd_proc(hwnd: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> isize {
-        let window_id = WindowId(hwnd);
-        let mut eloop = Win32EventLoop{ hwnd, quit: None };
-        let mut destroy = false;
-
-        let data_ptr = unsafe{ GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut WndProcData;
-        let push_event = |e: Event| {
-            if !data_ptr.is_null() {
-                let data = unsafe{ &mut *data_ptr };
-                data.events.push(e);
-            }
-        };
-
-        let result = match msg {
-            WM_CREATE => {
-                // Pass the user pointer to the window
-                let crea = lparam as *const CREATESTRUCTW;
-                let crea = unsafe{ &*crea };
-                unsafe{ SetWindowLongPtrW(hwnd, GWLP_USERDATA, crea.param as isize) };
-                let data: &mut WndProcData = unsafe{ &mut *crea.param.cast() };
-                // Push creation event
-                data.events.push(Event::WindowEvent{ window_id, event: WindowEvent::Created });
-                0
-            },
-            WM_CLOSE => {
-                push_event(Event::WindowEvent{ window_id, event: WindowEvent::CloseRequested });
-                0
-            },
-            WM_DESTROY => {
-                push_event(Event::WindowEvent{ window_id, event: WindowEvent::Closed });
-                destroy = true;
-                unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) }
-            },
-            WM_KILLFOCUS => {
-                push_event(Event::WindowEvent{ window_id, event: WindowEvent::FocusChanged(false) });
-                0
-            },
-            WM_SETFOCUS => {
-                push_event(Event::WindowEvent{ window_id, event: WindowEvent::FocusChanged(true) });
-                0
-            }
-            _ =>  unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) },
-        };
-
-        // Transfer to user
-        let data_ptr = unsafe{ GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut WndProcData;
-        if !data_ptr.is_null() {
-            let data = unsafe{ &mut *data_ptr };
-            if data.func.is_some() {
-                let func = data.func.as_mut().unwrap();
-                for e in data.events.drain(..) {
-                    func(&mut eloop, e);
-                }
-            }
-            if eloop.quit.is_some() {
-                data.quit = eloop.quit;
-            }
-            if destroy {
-                let _user: Box<WndProcData> = unsafe{ Box::from_raw(data_ptr.cast()) };
-            }
-        }
-
-        result
+        unimplemented!()
     }
 }
 
@@ -502,7 +459,7 @@ impl WindowTrait for Win32Window {
         }
 
         // User data
-        let user_data = Box::leak(Box::new(WndProcData::new()));
+        //let user_data = Box::leak(Box::new(WndProcData::new()));
 
         // Window
         let hwnd = unsafe{ CreateWindowExW(
@@ -510,25 +467,18 @@ impl WindowTrait for Win32Window {
             class_name.as_ptr(),
             window_name.as_ptr(),
             WS_OVERLAPPEDWINDOW,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
+            CW_USEDEFAULT, CW_USEDEFAULT,
+            CW_USEDEFAULT, CW_USEDEFAULT,
             ptr::null_mut(),
             ptr::null_mut(),
             hinstance,
-            (user_data as *mut WndProcData).cast()) };
+        /*(user_data as *mut WndProcData).cast()*/ ptr::null_mut() ) };
         if hwnd.is_null() {
             // TODO: Return error
-            println!("aaa: {:?}", std::io::Error::last_os_error());
             unimplemented!();
         }
 
-        unsafe{ SetLayeredWindowAttributes(
-            hwnd,
-            0,
-            255,
-            LWA_ALPHA) };
+        unsafe{ SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA) };
 
         Self{
             hwnd,
@@ -541,13 +491,13 @@ impl WindowTrait for Win32Window {
     fn inner_size(&self) -> (u32, u32) {
         let mut rect = RECT::new();
         unsafe{ GetClientRect(self.hwnd, &mut rect) };
-        ((rect.right - rect.left) as u32, (rect.bottom - rect.top) as u32)
+        (rect.width() as u32, rect.height() as u32)
     }
 
     fn outer_size(&self) -> (u32, u32) {
         let mut rect = RECT::new();
         unsafe{ GetWindowRect(self.hwnd, &mut rect) };
-        ((rect.right - rect.left) as u32, (rect.bottom - rect.top) as u32)
+        (rect.width() as u32, rect.height() as u32)
     }
 
     fn set_visible(&mut self, vis: bool) {
@@ -569,14 +519,7 @@ impl WindowTrait for Win32Window {
     }
 
     fn set_position(&mut self, x: i32, y: i32) -> bool {
-        unsafe{ SetWindowPos(
-            self.hwnd,
-            HWND_TOP,
-            x,
-            y,
-            0,
-            0,
-            SWP_NOSIZE | SWP_NOZORDER) != 0 }
+        unsafe{ SetWindowPos(self.hwnd, HWND_TOP, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER) != 0 }
     }
 
     fn set_inner_size(&mut self, w: u32, h: u32) -> bool {
@@ -593,34 +536,17 @@ impl WindowTrait for Win32Window {
             return false;
         }
         unsafe{ SetWindowPos(
-            self.hwnd,
-            HWND_TOP,
-            0,
-            0,
-            rect.right - rect.left,
-            rect.bottom - rect.top,
-            SWP_NOMOVE | SWP_NOZORDER) != 0 }
+            self.hwnd, HWND_TOP, 0, 0, rect.width(), rect.height(), SWP_NOMOVE | SWP_NOZORDER) != 0 }
     }
 
     fn set_pinned(&mut self, p: bool) -> bool {
         let tm = if p { HWND_TOPMOST } else { HWND_NOTOPMOST };
-        unsafe{ SetWindowPos(
-            self.hwnd,
-            tm,
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE) != 0 }
+        unsafe{ SetWindowPos(self.hwnd, tm, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE) != 0 }
     }
 
     fn set_transparency(&mut self, t: f64) -> bool {
         let b = (t * 255.0) as u8;
-        unsafe{ SetLayeredWindowAttributes(
-            self.hwnd,
-            0,
-            b,
-            LWA_ALPHA) != 0 }
+        unsafe{ SetLayeredWindowAttributes(self.hwnd, 0, b, LWA_ALPHA) != 0 }
     }
 
     fn set_fullscreen(&mut self, fs: bool) -> bool {
@@ -661,10 +587,7 @@ impl WindowTrait for Win32Window {
             unsafe{ SetWindowPos(
                 self.hwnd,
                 HWND_TOP,
-                mrect.left,
-                mrect.top,
-                mrect.right - mrect.left,
-                mrect.bottom - mrect.top,
+                mrect.left, mrect.top, mrect.width(), mrect.height(),
                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED) != 0 }
         }
         else {
@@ -678,10 +601,7 @@ impl WindowTrait for Win32Window {
             let res = unsafe{ SetWindowPos(
                 self.hwnd,
                 HWND_TOP,
-                rect.left,
-                rect.top,
-                rect.right - rect.left,
-                rect.bottom - rect.top,
+                rect.left, rect.top, rect.width(), rect.height(),
                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED) };
             if res == 0 {
                 return false;
