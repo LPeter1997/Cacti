@@ -165,6 +165,7 @@ const SWP_FRAMECHANGED: u32 = 0x0020;
 const GWL_STYLE: i32 = -16;
 const GWL_EXSTYLE: i32 = -20;
 
+const GWLP_WNDPROC: i32 = -4;
 const GWLP_USERDATA: i32 = -21;
 
 const PM_REMOVE: u32 = 0x0001;
@@ -395,23 +396,51 @@ impl MonitorTrait for Win32Monitor {
 }
 
 #[derive(Debug)]
-pub struct Win32EventLoop {}
+pub struct Win32EventLoop {
+    window_handles: Vec<*mut c_void>,
+}
 
 impl EventLoopTrait for Win32EventLoop {
     fn new() -> Self {
-        Self{}
+        Self{
+            window_handles: Vec::new(),
+        }
     }
 
     fn add_window(&mut self, wnd: &Win32Window) {
-        unimplemented!()
+        self.window_handles.push(wnd.handle_ptr());
     }
 
     fn quit(&mut self, code: u32) {
         unimplemented!()
     }
 
-    fn run<F>(&mut self, f: F) where F: FnMut(Event) {
-        unimplemented!()
+    fn run<F>(&mut self, mut f: F) where F: FnMut(Event) + 'static {
+        // Set the user function
+        for handle in &self.window_handles {
+            if let Some(data) = Win32Window::user_data(*handle) {
+                data.handler = Some(&mut f);
+            }
+        }
+        // Start looping
+        let mut msg = MSG::new();
+        loop {
+            // TODO: Expose to user
+            let poll = true;
+            let have_events = unsafe{ if poll {
+                    PeekMessageW(&mut msg, ptr::null_mut(), 0, 0, PM_REMOVE)
+                }
+                else {
+                    GetMessageW(&mut msg, ptr::null_mut(), 0, 0)
+                } };
+            if have_events != 0 {
+                unsafe{
+                    TranslateMessage(&mut msg);
+                    DispatchMessageW(&mut msg);
+                }
+            }
+            // TODO: Exit condition
+        }
     }
 }
 
@@ -423,6 +452,20 @@ struct HwndState {
     rect: RECT,
 }
 
+struct HwndUser {
+    events: Vec<Event>,
+    handler: Option<*mut dyn FnMut(Event)>,
+}
+
+impl HwndUser {
+    fn new() -> Self {
+        Self{
+            events: Vec::new(),
+            handler: None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Win32Window {
     hwnd: *mut c_void,
@@ -430,8 +473,55 @@ pub struct Win32Window {
 }
 
 impl Win32Window {
+    fn user_data(hwnd: *mut c_void) -> Option<&'static mut HwndUser> {
+        let user_data = unsafe{ GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut HwndUser;
+        if user_data.is_null() {
+            return None;
+        }
+        let data = unsafe{ &mut *user_data };
+        Some(data)
+    }
+
     extern "system" fn wnd_proc(hwnd: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> isize {
-        unimplemented!()
+        let window_id = WindowId(hwnd);
+        let window_event = |event: WindowEvent| {
+            Event::WindowEvent{ window_id, event }
+        };
+        let push_event = |e: Event| {
+            if let Some(data) = Self::user_data(hwnd) {
+                data.events.push(e);
+            }
+        };
+        // Handle events
+        let ret = match msg {
+            WM_CREATE => {
+                // We have to set the user-pointer
+                let crea = unsafe{ &*(lparam as *const CREATESTRUCTW) };
+                unsafe{ SetWindowLongPtrW(hwnd, GWLP_USERDATA, crea.param as isize); }
+                // Send event
+                push_event(window_event(WindowEvent::Created));
+                0
+            },
+            WM_CLOSE => {
+                push_event(window_event(WindowEvent::CloseRequested));
+                0
+            },
+            WM_DESTROY => {
+                push_event(window_event(WindowEvent::Closed));
+                unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) }
+            },
+            _ => unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) },
+        };
+        // Try emptying the queue
+        if let Some(data) = Self::user_data(hwnd) {
+            if let Some(handler) = data.handler {
+                let handler = unsafe{ &mut *handler };
+                for e in data.events.drain(..) {
+                    handler(e);
+                }
+            }
+        }
+        ret
     }
 }
 
@@ -459,7 +549,7 @@ impl WindowTrait for Win32Window {
         }
 
         // User data
-        //let user_data = Box::leak(Box::new(WndProcData::new()));
+        let user_data = Box::leak(Box::new(HwndUser::new()));
 
         // Window
         let hwnd = unsafe{ CreateWindowExW(
@@ -472,7 +562,7 @@ impl WindowTrait for Win32Window {
             ptr::null_mut(),
             ptr::null_mut(),
             hinstance,
-        /*(user_data as *mut WndProcData).cast()*/ ptr::null_mut() ) };
+            (user_data as *mut HwndUser).cast()) };
         if hwnd.is_null() {
             // TODO: Return error
             unimplemented!();
@@ -484,6 +574,10 @@ impl WindowTrait for Win32Window {
             hwnd,
             windowed: None,
         }
+    }
+
+    fn close(&mut self) {
+        unsafe{ DestroyWindow(self.hwnd); }
     }
 
     fn handle_ptr(&self) -> *mut c_void { self.hwnd }
@@ -611,5 +705,13 @@ impl WindowTrait for Win32Window {
             }
             true
         }
+    }
+}
+
+impl Drop for Win32Window {
+    fn drop(&mut self) {
+        let user_data = unsafe{ GetWindowLongPtrW(self.hwnd, GWLP_USERDATA) } as *mut HwndUser;
+        unsafe{ Box::from_raw(user_data); }
+        unsafe{ DestroyWindow(self.hwnd); }
     }
 }
