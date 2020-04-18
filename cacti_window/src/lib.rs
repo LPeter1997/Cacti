@@ -60,17 +60,17 @@ impl Monitor {
 pub struct EventLoop(EventLoopImpl);
 
 impl EventLoop {
-    fn new() -> Self { Self(EventLoopImpl::new()) }
+    pub fn new() -> Self { Self(EventLoopImpl::new()) }
 
-    fn add_window(&mut self, wnd: &Window) {
+    pub fn add_window(&mut self, wnd: &Window) {
         self.0.add_window(&wnd.0);
     }
 
-    fn quit(&mut self, code: u32) {
+    pub fn quit(&mut self, code: u32) {
         self.0.quit(code);
     }
 
-    fn run<F>(&mut self, f: F) where F: FnMut(Event) {
+    pub fn run<F>(&mut self, f: F) where F: FnMut(Event) + 'static {
         self.0.run(f);
     }
 }
@@ -173,7 +173,7 @@ trait EventLoopTrait {
     fn add_window(&mut self, wnd: &WindowImpl);
     fn quit(&mut self, code: u32);
 
-    fn run<F>(&mut self, f: F) where F: FnMut(Event);
+    fn run<F>(&mut self, f: F) where F: FnMut(Event) + 'static;
 }
 
 trait WindowTrait: Sized {
