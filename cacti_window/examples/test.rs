@@ -8,24 +8,17 @@ fn main() -> io::Result<()> {
             monitor.name(), monitor.position(), monitor.size(), monitor.dpi(), monitor.scale(), monitor.is_primary());
     }
 
+    let mut event_loop = EventLoop::new();
+
     let mut wnd = Window::new();
+    event_loop.add_window(&wnd);
     wnd.set_title("Hello, Window!");
     wnd.set_position(100, 100);
     wnd.set_inner_size(960, 540);
     wnd.set_visible(true);
-    //wnd.set_resizable(false);
-    //wnd.set_pinned(true);
-    //wnd.set_transparency(1.0);
-    //wnd.set_fullscreen(true);
 
-    wnd.run_event_loop(|eloop, e| {
-        println!("Event: {:?}", e);
-        match e {
-            Event::WindowEvent{ window_id: _, event: WindowEvent::CloseRequested } => {
-                eloop.quit(0);
-            },
-            _ => {},
-        }
+    event_loop.run(|event| {
+        println!("{:?}", event);
     });
 
     Ok(())
