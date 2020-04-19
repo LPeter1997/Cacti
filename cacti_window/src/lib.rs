@@ -66,7 +66,8 @@ impl EventLoop {
         self.0.add_window(&wnd.0);
     }
 
-    pub fn run<F>(&mut self, f: F) where F: FnMut(Event) + 'static {
+    pub fn run<F>(&mut self, f: F)
+        where F: FnMut(&mut ControlFlow, Event) + 'static {
         self.0.run(f);
     }
 }
@@ -178,7 +179,8 @@ trait EventLoopTrait {
     fn add_window(&mut self, wnd: &WindowImpl);
     fn quit(&mut self, code: u32);
 
-    fn run<F>(&mut self, f: F) where F: FnMut(Event) + 'static;
+    fn run<F>(&mut self, f: F)
+        where F: FnMut(&mut ControlFlow, Event) + 'static;
 }
 
 trait WindowTrait: Sized {

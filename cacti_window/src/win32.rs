@@ -415,18 +415,21 @@ impl EventLoopTrait for Win32EventLoop {
         unimplemented!()
     }
 
-    fn run<F>(&mut self, mut f: F) where F: FnMut(Event) + 'static {
+    fn run<F>(&mut self, mut f: F)
+        where F: FnMut(&mut ControlFlow, Event) + 'static {
         // Set the user function
+        let mut control_flow = ControlFlow::Poll;
         for handle in &self.window_handles {
             if let Some(data) = Win32Window::user_data(*handle) {
                 data.handler = Some(&mut f);
+                data.control_flow = &mut control_flow;
             }
         }
         // Start looping
         let mut msg = MSG::new();
         loop {
-            // TODO: Expose to user
-            let poll = true;
+            // Decide if poll or to wait
+            let poll = control_flow == ControlFlow::Poll;
             let have_events = unsafe{ if poll {
                     PeekMessageW(&mut msg, ptr::null_mut(), 0, 0, PM_REMOVE)
                 }
@@ -439,7 +442,10 @@ impl EventLoopTrait for Win32EventLoop {
                     DispatchMessageW(&mut msg);
                 }
             }
-            // TODO: Exit condition
+            // Check exit condition
+            if control_flow == ControlFlow::Exit {
+                break;
+            }
         }
     }
 }
@@ -454,13 +460,15 @@ struct HwndState {
 
 struct HwndUser {
     events: Vec<Event>,
-    handler: Option<*mut dyn FnMut(Event)>,
+    control_flow: *mut ControlFlow,
+    handler: Option<*mut dyn FnMut(&mut ControlFlow, Event)>,
 }
 
 impl HwndUser {
     fn new() -> Self {
         Self{
             events: Vec::new(),
+            control_flow: ptr::null_mut(),
             handler: None,
         }
     }
@@ -516,8 +524,9 @@ impl Win32Window {
         if let Some(data) = Self::user_data(hwnd) {
             if let Some(handler) = data.handler {
                 let handler = unsafe{ &mut *handler };
+                let control_flow = unsafe{ &mut *data.control_flow };
                 for e in data.events.drain(..) {
-                    handler(e);
+                    handler(control_flow, e);
                 }
             }
         }
@@ -577,7 +586,7 @@ impl WindowTrait for Win32Window {
     }
 
     fn close(&mut self) {
-        unsafe{ DestroyWindow(self.hwnd); }
+        unsafe{ ShowWindow(self.hwnd, SW_HIDE) };
     }
 
     fn handle_ptr(&self) -> *mut c_void { self.hwnd }

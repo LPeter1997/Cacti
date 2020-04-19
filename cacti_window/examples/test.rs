@@ -17,13 +17,13 @@ fn main() -> io::Result<()> {
     wnd.set_inner_size(960, 540);
     wnd.set_visible(true);
 
-    event_loop.run(move |event| {
+    event_loop.run(move |control_flow, event| {
         println!("{:?}", event);
 
         match event {
             Event::WindowEvent{ window_id: _, event: WindowEvent::CloseRequested } => {
                 wnd.close();
-                //event_loop.quit(0);
+                *control_flow = ControlFlow::Exit;
             },
             _ => {},
         }
