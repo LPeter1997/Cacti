@@ -3,6 +3,7 @@
 
 use std::ffi::c_void;
 use std::os::raw::{c_char, c_long, c_ulong};
+use std::cell::RefCell;
 use std::ptr;
 use std::mem;
 use super::*;
@@ -13,7 +14,8 @@ use super::*;
 
 #[link(name = "X11")]
 extern "C" {
-    fn XOpenDisplay(name: *mut c_char) -> *mut c_void;
+    fn XOpenDisplay(name: *const c_char) -> *mut c_void;
+    fn XCloseDisplay(display: *mut c_void) -> i32;
     fn XScreenCount(display: *mut c_void) -> i32;
     fn XScreenOfDisplay(display: *mut c_void, index: i32) -> *mut c_void;
     fn XWidthOfScreen(screen: *mut c_void) -> i32;
@@ -40,7 +42,7 @@ extern "C" {
         y: i32,
         width: u32,
         height: u32,
-        border_width: i32,
+        border_width: u32,
         border: c_ulong,
         background: c_ulong,
     ) -> c_ulong;
@@ -58,7 +60,14 @@ extern "C" {
         height: u32,
     ) -> i32;
     fn XDefaultGC(display: *mut c_void, screen_idx: i32) -> *mut c_void;
+    fn XSelectInput(
+        display: *mut c_void, 
+        window: c_ulong, 
+        mask: c_long
+    ) -> i32;
 }
+
+const ExposureMask: c_long = 0x8000;
 
 #[repr(C)]
 struct XEvent {
@@ -75,22 +84,76 @@ impl XEvent {
 //                               Implementation                               //
 // ////////////////////////////////////////////////////////////////////////// //
 
+// We need a mechanism to safely store a single display pointer and release it 
+// when no longer needed.
+// NOTE: Do we need all this crud?
+
+thread_local! {
+    static CONNECTION: RefCell<(*mut c_void, usize)> = RefCell::new((ptr::null_mut(), 0));
+}
+
+fn ref_connection() -> *mut c_void {
+    CONNECTION.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.1 == 0 {
+            c.0 = unsafe{ XOpenDisplay(ptr::null()) };
+        }
+        c.1 += 1;
+        c.0
+    })
+}
+
+fn forget_connection() {
+    CONNECTION.with(|c| {
+        let mut c = c.borrow_mut();
+        c.1 -= 1;
+        if c.1 == 0 {
+            unsafe{ XCloseDisplay(c.0) };
+            c.0 = ptr::null_mut();
+        }
+    });
+}
+
+#[derive(Debug)]
+struct Connection(*mut c_void);
+
+impl Connection {
+    fn new() -> Self {
+        Self(ref_connection())
+    }
+}
+
+impl Clone for Connection {
+    fn clone(&self) -> Self {
+        ref_connection();
+        Self(self.0)
+    }
+}
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        forget_connection();
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 // TODO: Check return values
 
 #[derive(Debug)]
 pub struct X11Monitor {
-    srvr: *mut c_void,
+    srvr: Connection,
     handle: *mut c_void,
 }
 
 impl MonitorTrait for X11Monitor {
     fn all_monitors() -> Vec<Self> {
         let mut result = Vec::new();
-        let srvr = unsafe{ XOpenDisplay(ptr::null_mut()) };
-        let cnt = unsafe{ XScreenCount(srvr) };
+        let srvr = Connection::new();
+        let cnt = unsafe{ XScreenCount(srvr.0) };
         for i in 0..cnt {
-            let handle = unsafe{ XScreenOfDisplay(srvr, i) };
-            result.push(Self{ srvr, handle });
+            let handle = unsafe{ XScreenOfDisplay(srvr.0, i) };
+            result.push(Self{ srvr: srvr.clone(), handle });
         }
         result
     }
@@ -106,7 +169,7 @@ impl MonitorTrait for X11Monitor {
 
     fn is_primary(&self) -> bool {
         // NOTE: Not sure this is correct
-        let def = unsafe{ XDefaultScreenOfDisplay(self.srvr) };
+        let def = unsafe{ XDefaultScreenOfDisplay(self.srvr.0) };
         def == self.handle
     }
 
@@ -115,7 +178,7 @@ impl MonitorTrait for X11Monitor {
         let (mut ret_root, mut xp, mut yp, mut width, mut height, mut border, mut depth) =
             (0, 0, 0, 0, 0, 0, 0);
         unsafe{ XGetGeometry(
-            self.srvr, root,
+            self.srvr.0, root,
             &mut ret_root,
             &mut xp, &mut yp,
             &mut width, &mut height,
@@ -134,7 +197,7 @@ impl MonitorTrait for X11Monitor {
         let (mut ret_root, mut xp, mut yp, mut width, mut height, mut border, mut depth) =
             (0, 0, 0, 0, 0, 0, 0);
         unsafe{ XGetGeometry(
-            self.srvr, root,
+            self.srvr.0, root,
             &mut ret_root,
             &mut xp, &mut yp,
             &mut width, &mut height,
@@ -153,8 +216,7 @@ impl MonitorTrait for X11Monitor {
 }
 
 #[derive(Debug)]
-pub struct X11EventLoop {
-}
+pub struct X11EventLoop {}
 
 impl EventLoopTrait for X11EventLoop {
     fn new() -> Self { 
@@ -166,36 +228,36 @@ impl EventLoopTrait for X11EventLoop {
 
     fn run<F>(&mut self, f: F)
         where F: FnMut(&mut ControlFlow, Event) + 'static {
-        let srvr = unsafe{ XOpenDisplay(ptr::null_mut()) };
+        let srvr = Connection::new();
         let mut e = XEvent::new();
         loop {
-            println!("RUN {}", mem::size_of::<XEvent>());
-            unsafe{ XNextEvent(srvr, &mut e) };
+            unsafe{ XNextEvent(srvr.0, &mut e) };
         }
     }
 }
 
 #[derive(Debug)]
 pub struct X11Window {
-    srvr: *mut c_void,
+    srvr: Connection,
     handle: c_ulong,
 }
 
 impl WindowTrait for X11Window {
     fn new() -> Self {
-        let srvr = unsafe{ XOpenDisplay(ptr::null_mut()) };
-        let screen = unsafe{ XDefaultScreenOfDisplay(srvr) };
+        let srvr = Connection::new();
+        let screen = unsafe{ XDefaultScreenOfDisplay(srvr.0) };
         let root = unsafe{ XRootWindowOfScreen(screen) };
-        let black = unsafe{ XBlackPixel(srvr, 0) };
-        let white = unsafe{ XWhitePixel(srvr, 0) };
+        let black = unsafe{ XBlackPixel(srvr.0, 0) };
+        let white = unsafe{ XWhitePixel(srvr.0, 0) };
         let handle = unsafe{ XCreateSimpleWindow(
-            srvr, 
+            srvr.0, 
             root, 
-            0, 0, 
             100, 100, 
+            200, 200, 
             1,
             black, white) };
-        unsafe{ XMapWindow(srvr, handle) };
+        unsafe{ XSelectInput(srvr.0, handle, ExposureMask) };
+        unsafe{ XMapWindow(srvr.0, handle) };
         Self{ srvr, handle }
     }
 
