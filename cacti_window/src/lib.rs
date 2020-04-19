@@ -289,9 +289,26 @@ trait WindowTrait: Sized {
 }
 
 mod win32;
+mod x11;
 
-#[cfg(target_os = "windows")] use win32 as impls;
+#[cfg(target_os = "windows")]
+mod impls {
+    use super::win32::*;
 
-type MonitorImpl = impls::Win32Monitor;
-type EventLoopImpl = impls::Win32EventLoop;
-type WindowImpl = impls::Win32Window;
+    pub type MonitorImpl = Win32Monitor;
+    pub type EventLoopImpl = Win32EventLoop;
+    pub type WindowImpl = Win32Window;
+}
+
+#[cfg(target_os = "linux")]
+mod impls {
+    use super::x11::*;
+
+    pub type MonitorImpl = X11Monitor;
+    pub type EventLoopImpl = X11EventLoop;
+    pub type WindowImpl = X11Window;
+}
+
+type MonitorImpl = impls::MonitorImpl;
+type EventLoopImpl = impls::EventLoopImpl;
+type WindowImpl = impls::WindowImpl;
