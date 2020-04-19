@@ -7,11 +7,6 @@ use std::ptr;
 use std::mem;
 use super::*;
 
-use std::ffi::c_void;
-use std::os::raw::c_char;
-use std::ptr;
-use std::mem;
-
 // ////////////////////////////////////////////////////////////////////////// //
 //                                X11 bindings                                //
 // ////////////////////////////////////////////////////////////////////////// //
@@ -55,7 +50,7 @@ pub struct X11Monitor {
 impl MonitorTrait for X11Monitor {
     fn all_monitors() -> Vec<Self> {
         let mut result = Vec::new();
-        let srvr = unsafe{ XOpenDisplay(ptr::null()) };
+        let srvr = unsafe{ XOpenDisplay(ptr::null_mut()) };
         let cnt = unsafe{ XScreenCount(srvr) };
         for i in 0..cnt {
             let handle = unsafe{ XScreenOfDisplay(srvr, i) };
@@ -80,7 +75,7 @@ impl MonitorTrait for X11Monitor {
     }
 
     fn position(&self) -> PhysicalPosition {
-        let root = unsafe{ XRootWindowOfScreen(screen0) };
+        let root = unsafe{ XRootWindowOfScreen(self.handle) };
         let (mut ret_root, mut xp, mut yp, mut width, mut height, mut border, mut depth) =
             (0, 0, 0, 0, 0, 0, 0);
         unsafe{ XGetGeometry(
@@ -93,7 +88,7 @@ impl MonitorTrait for X11Monitor {
     }
 
     fn size(&self) -> PhysicalSize {
-        let root = unsafe{ XRootWindowOfScreen(screen0) };
+        let root = unsafe{ XRootWindowOfScreen(self.handle) };
         let (mut ret_root, mut xp, mut yp, mut width, mut height, mut border, mut depth) =
             (0, 0, 0, 0, 0, 0, 0);
         unsafe{ XGetGeometry(
@@ -106,7 +101,7 @@ impl MonitorTrait for X11Monitor {
     }
 
     fn dpi(&self) -> Dpi {
-        let root = unsafe{ XRootWindowOfScreen(screen0) };
+        let root = unsafe{ XRootWindowOfScreen(self.handle) };
         let (mut ret_root, mut xp, mut yp, mut width, mut height, mut border, mut depth) =
             (0, 0, 0, 0, 0, 0, 0);
         unsafe{ XGetGeometry(
