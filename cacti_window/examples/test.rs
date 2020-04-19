@@ -11,14 +11,14 @@ fn main() -> io::Result<()> {
     let mut event_loop = EventLoop::new();
 
     let mut wnd = Window::new();
-    event_loop.add_window(&wnd);
+    /*event_loop.add_window(&wnd);
     wnd.set_title("Hello, Window!");
     wnd.set_position(PhysicalPosition::new(100, 100));
     wnd.set_inner_size(PhysicalSize::new(960, 540));
-    wnd.set_visible(true);
+    wnd.set_visible(true);*/
 
     event_loop.run(move |control_flow, event| {
-        println!("{:?}", event);
+        /*println!("{:?}", event);
 
         match event {
             Event::WindowEvent{ window_id: _, event: WindowEvent::CloseRequested } => {
@@ -27,7 +27,7 @@ fn main() -> io::Result<()> {
                 *control_flow = ControlFlow::Exit;
             },
             _ => {},
-        }
+        }*/
     });
 
     Ok(())
