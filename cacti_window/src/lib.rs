@@ -151,6 +151,70 @@ pub enum WindowEvent {
 }
 
 // ////////////////////////////////////////////////////////////////////////// //
+//                            Size representations                            //
+// ////////////////////////////////////////////////////////////////////////// //
+
+#[derive(Debug, Clone, Copy)]
+pub struct PhysicalPosition {
+    pub x: i32,
+    pub y: i32,
+}
+
+impl PhysicalPosition {
+    pub fn to_logical(&self, scale: f64) -> LogicalPosition {
+        LogicalPosition{
+            x: self.x as f64 / scale,
+            y: self.y as f64 / scale,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PhysicalSize {
+    pub width: u32,
+    pub height: u32,
+}
+
+impl PhysicalSize {
+    pub fn to_logical(&self, scale: f64) -> LogicalSize {
+        LogicalSize{
+            width: self.width as f64 / scale,
+            height: self.height as f64 / scale,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LogicalPosition {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl LogicalPosition {
+    pub fn to_physical(&self, scale: f64) -> PhysicalPosition {
+        PhysicalPosition{
+            x: (self.x * scale) as i32,
+            y: (self.y * scale) as i32,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LogicalSize {
+    pub width: f64,
+    pub height: f64,
+}
+
+impl LogicalSize {
+    pub fn to_physical(&self, scale: f64) -> PhysicalSize {
+        PhysicalSize{
+            width: (self.width * scale) as u32,
+            height: (self.height * scale) as u32,
+        }
+    }
+}
+
+// ////////////////////////////////////////////////////////////////////////// //
 //                               Implementation                               //
 // ////////////////////////////////////////////////////////////////////////// //
 
