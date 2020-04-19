@@ -381,7 +381,7 @@ impl MonitorTrait for Win32Monitor {
             unimplemented!();
         }
         let rect = info.monitor_rect;
-        PhysicalPosition{ x: rect.left, y: rect.top }
+        PhysicalPosition::new(rect.left, rect.top)
     }
 
     fn size(&self) -> PhysicalSize {
@@ -392,7 +392,7 @@ impl MonitorTrait for Win32Monitor {
             unimplemented!();
         }
         let rect = info.monitor_rect;
-        PhysicalSize{ width: rect.width() as u32, height: rect.height() as u32 }
+        PhysicalSize::new(rect.width() as u32, rect.height() as u32)
     }
 
     fn dpi(&self) -> Dpi {
@@ -403,7 +403,7 @@ impl MonitorTrait for Win32Monitor {
             // TODO: Return error
             unimplemented!();
         }
-        Dpi{ horizontal: dpix as f64, vertical: dpiy as f64 }
+        Dpi::new(dpix as f64, dpiy as f64)
     }
 
     fn scale(&self) -> f64 {
@@ -555,13 +555,15 @@ impl Win32Window {
                 let rect = unsafe{ &*(lparam as *const RECT) };
                 let width = rect.width() as u32;
                 let height = rect.height() as u32;
-                push_event(window_event(WindowEvent::Resized(PhysicalSize::new(width, height))));
+                let size = PhysicalSize::new(width, height);
+                push_event(window_event(WindowEvent::Resized(size)));
                 unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) }
             },
             WM_SIZE => {
                 let width = (lparam & 0xffff) as u32;
                 let height = (lparam >> 16) as u32;
-                push_event(window_event(WindowEvent::Resized(PhysicalSize::new(width, height))));
+                let size = PhysicalSize::new(width, height);
+                push_event(window_event(WindowEvent::Resized(size)));
                 unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) }
             },
             // Others
@@ -646,13 +648,13 @@ impl WindowTrait for Win32Window {
     fn inner_size(&self) -> PhysicalSize {
         let mut rect = RECT::new();
         unsafe{ GetClientRect(self.hwnd, &mut rect) };
-        PhysicalSize{ width: rect.width() as u32, height: rect.height() as u32 }
+        PhysicalSize::new(rect.width() as u32, rect.height() as u32)
     }
 
     fn outer_size(&self) -> PhysicalSize {
         let mut rect = RECT::new();
         unsafe{ GetWindowRect(self.hwnd, &mut rect) };
-        PhysicalSize{ width: rect.width() as u32, height: rect.height() as u32 }
+        PhysicalSize::new(rect.width() as u32, rect.height() as u32)
     }
 
     fn set_visible(&mut self, vis: bool) {
