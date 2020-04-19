@@ -162,6 +162,8 @@ const SWP_NOZORDER: u32 = 0x0004;
 const SWP_NOACTIVATE: u32 = 0x0010;
 const SWP_FRAMECHANGED: u32 = 0x0020;
 
+const CS_OWNDC: u32 = 0x0020;
+
 const GWL_STYLE: i32 = -16;
 const GWL_EXSTYLE: i32 = -20;
 
@@ -598,6 +600,7 @@ impl WindowTrait for Win32Window {
 
         // Window class
         let mut wndclass = WNDCLASSW::new();
+        wndclass.style = CS_OWNDC;
         wndclass.wnd_proc = Some(Self::wnd_proc);
         wndclass.hinstance = hinstance;
         wndclass.class_name = class_name.as_ptr();
