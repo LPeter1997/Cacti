@@ -13,8 +13,8 @@ fn main() -> io::Result<()> {
     let mut wnd = Window::new();
     event_loop.add_window(&wnd);
     wnd.set_title("Hello, Window!");
-    wnd.set_position(100, 100);
-    wnd.set_inner_size(960, 540);
+    wnd.set_position(PhysicalPosition::new(100, 100));
+    wnd.set_inner_size(PhysicalSize::new(960, 540));
     wnd.set_visible(true);
 
     event_loop.run(move |control_flow, event| {

@@ -350,21 +350,52 @@ impl MonitorTrait for Win32Monitor {
 
     fn handle_ptr(&self) -> *mut c_void { self.hmonitor }
 
-    fn info(&self) -> io::Result<MonitorInfo> {
-        // Get MONITORINFOEXW
+    fn name(&self) -> Option<String> {
         let mut info = MONITORINFOEXW::new();
         let ret = unsafe{ GetMonitorInfoW(self.hmonitor, &mut info) };
         if ret == 0 {
             // TODO: Return error
             unimplemented!();
         }
-        let rect = info.monitor_rect;
-        let primary = (info.flags & MONITORINFOF_PRIMARY) != 0;
         // Decode name
         let null_pos = info.dev_name.iter().position(|c| *c == 0).unwrap_or(32);
         let name = String::from_utf16_lossy(&info.dev_name[0..null_pos]);
+        Some(name)
+    }
 
-        // Get DPI
+    fn is_primary(&self) -> bool {
+        let mut info = MONITORINFO::new();
+        let ret = unsafe{ GetMonitorInfoW(self.hmonitor, (&mut info as *mut MONITORINFO).cast()) };
+        if ret == 0 {
+            // TODO: Return error
+            unimplemented!();
+        }
+        (info.flags & MONITORINFOF_PRIMARY) != 0
+    }
+
+    fn position(&self) -> PhysicalPosition {
+        let mut info = MONITORINFO::new();
+        let ret = unsafe{ GetMonitorInfoW(self.hmonitor, (&mut info as *mut MONITORINFO).cast()) };
+        if ret == 0 {
+            // TODO: Return error
+            unimplemented!();
+        }
+        let rect = info.monitor_rect;
+        PhysicalPosition{ x: rect.left, y: rect.top }
+    }
+
+    fn size(&self) -> PhysicalSize {
+        let mut info = MONITORINFO::new();
+        let ret = unsafe{ GetMonitorInfoW(self.hmonitor, (&mut info as *mut MONITORINFO).cast()) };
+        if ret == 0 {
+            // TODO: Return error
+            unimplemented!();
+        }
+        let rect = info.monitor_rect;
+        PhysicalSize{ width: rect.width() as u32, height: rect.height() as u32 }
+    }
+
+    fn dpi(&self) -> Dpi {
         let mut dpix = 0u32;
         let mut dpiy = 0u32;
         let ret = unsafe{ GetDpiForMonitor(self.hmonitor, MDT_RAW_DPI, &mut dpix, &mut dpiy) };
@@ -372,8 +403,10 @@ impl MonitorTrait for Win32Monitor {
             // TODO: Return error
             unimplemented!();
         }
+        Dpi{ horizontal: dpix as f64, vertical: dpiy as f64 }
+    }
 
-        // Get scale factor
+    fn scale(&self) -> f64 {
         let mut sfactor = 0u32;
         let ret = unsafe{ GetScaleFactorForMonitor(self.hmonitor, &mut sfactor) };
         if ret != 0 {
@@ -384,16 +417,7 @@ impl MonitorTrait for Win32Monitor {
             // TODO: Return error
             unimplemented!();
         }
-        let scale = (sfactor as f64) / 100.0;
-
-        Ok(MonitorInfo{
-            name: Some(name),
-            position: (rect.left, rect.top),
-            size: (rect.width() as u32, rect.height() as u32),
-            dpi: (dpix as f64, dpiy as f64),
-            scale,
-            primary,
-        })
+        (sfactor as f64) / 100.0
     }
 }
 
@@ -411,10 +435,6 @@ impl EventLoopTrait for Win32EventLoop {
 
     fn add_window(&mut self, wnd: &Win32Window) {
         self.window_handles.push(wnd.handle_ptr());
-    }
-
-    fn quit(&mut self, code: u32) {
-        unimplemented!()
     }
 
     fn run<F>(&mut self, mut f: F)
@@ -535,13 +555,13 @@ impl Win32Window {
                 let rect = unsafe{ &*(lparam as *const RECT) };
                 let width = rect.width() as u32;
                 let height = rect.height() as u32;
-                push_event(window_event(WindowEvent::Resized{ width, height }));
+                push_event(window_event(WindowEvent::Resized(PhysicalSize::new(width, height))));
                 unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) }
             },
             WM_SIZE => {
                 let width = (lparam & 0xffff) as u32;
                 let height = (lparam >> 16) as u32;
-                push_event(window_event(WindowEvent::Resized{ width, height }));
+                push_event(window_event(WindowEvent::Resized(PhysicalSize::new(width, height))));
                 unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) }
             },
             // Others
@@ -618,16 +638,21 @@ impl WindowTrait for Win32Window {
 
     fn handle_ptr(&self) -> *mut c_void { self.hwnd }
 
-    fn inner_size(&self) -> (u32, u32) {
-        let mut rect = RECT::new();
-        unsafe{ GetClientRect(self.hwnd, &mut rect) };
-        (rect.width() as u32, rect.height() as u32)
+    fn monitor(&self) -> Win32Monitor {
+        let monitor = unsafe{ MonitorFromWindow(self.hwnd, MONITOR_DEFAULTTONEAREST) };
+        Win32Monitor{ hmonitor: monitor }
     }
 
-    fn outer_size(&self) -> (u32, u32) {
+    fn inner_size(&self) -> PhysicalSize {
+        let mut rect = RECT::new();
+        unsafe{ GetClientRect(self.hwnd, &mut rect) };
+        PhysicalSize{ width: rect.width() as u32, height: rect.height() as u32 }
+    }
+
+    fn outer_size(&self) -> PhysicalSize {
         let mut rect = RECT::new();
         unsafe{ GetWindowRect(self.hwnd, &mut rect) };
-        (rect.width() as u32, rect.height() as u32)
+        PhysicalSize{ width: rect.width() as u32, height: rect.height() as u32 }
     }
 
     fn set_visible(&mut self, vis: bool) {
@@ -648,18 +673,18 @@ impl WindowTrait for Win32Window {
         unsafe{ SetWindowTextW(self.hwnd, wtitle.as_ptr()) != 0 }
     }
 
-    fn set_position(&mut self, x: i32, y: i32) -> bool {
-        unsafe{ SetWindowPos(self.hwnd, HWND_TOP, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER) != 0 }
+    fn set_position(&mut self, pos: PhysicalPosition) -> bool {
+        unsafe{ SetWindowPos(self.hwnd, HWND_TOP, pos.x, pos.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER) != 0 }
     }
 
-    fn set_inner_size(&mut self, w: u32, h: u32) -> bool {
+    fn set_inner_size(&mut self, siz: PhysicalSize) -> bool {
         let style = unsafe{ GetWindowLongW(self.hwnd, GWL_STYLE) };
         let exstyle = unsafe{ GetWindowLongW(self.hwnd, GWL_EXSTYLE) };
         let mut rect = RECT{
             left: 0,
             top: 0,
-            right: w as i32,
-            bottom: h as i32,
+            right: siz.width as i32,
+            bottom: siz.height as i32,
         };
         let ret = unsafe{ AdjustWindowRectEx(&mut rect, style as u32, 0, exstyle as u32) };
         if ret == 0 {
@@ -667,6 +692,11 @@ impl WindowTrait for Win32Window {
         }
         unsafe{ SetWindowPos(
             self.hwnd, HWND_TOP, 0, 0, rect.width(), rect.height(), SWP_NOMOVE | SWP_NOZORDER) != 0 }
+    }
+
+    fn set_outer_size(&mut self, siz: PhysicalSize) -> bool {
+        unsafe{ SetWindowPos(
+            self.hwnd, HWND_TOP, 0, 0, siz.width as i32, siz.height as i32, SWP_NOMOVE | SWP_NOZORDER) != 0 }
     }
 
     fn set_pinned(&mut self, p: bool) -> bool {
