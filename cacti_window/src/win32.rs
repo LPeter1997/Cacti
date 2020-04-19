@@ -319,6 +319,8 @@ fn to_wstring(s: &OsStr) -> Vec<u16> {
 //                               Implementation                               //
 // ////////////////////////////////////////////////////////////////////////// //
 
+// TODO: Check return values
+
 #[derive(Debug)]
 pub struct Win32Monitor {
     hmonitor: *mut c_void,
