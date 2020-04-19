@@ -70,9 +70,7 @@ impl Window {
     pub fn handle_ptr(&self) -> *const c_void { self.0.handle_ptr() }
     pub fn handle_mut_ptr(&mut self) -> *mut c_void { self.0.handle_ptr() }
 
-    pub fn monitor(&self) -> Monitor {
-        Monitor(self.0.monitor())
-    }
+    pub fn monitor(&self) -> Monitor { Monitor(self.0.monitor()) }
 
     pub fn dpi(&self) -> Dpi { self.monitor().dpi() }
     pub fn scale(&self) -> f64 { self.monitor().scale() }
@@ -140,6 +138,7 @@ pub enum Event {
     },
 }
 
+// TODO: Event for DPI/scale changes
 #[derive(Debug)]
 pub enum WindowEvent {
     Created,
