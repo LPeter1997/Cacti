@@ -23,6 +23,7 @@ fn main() -> io::Result<()> {
         match event {
             Event::WindowEvent{ window_id: _, event: WindowEvent::CloseRequested } => {
                 wnd.close();
+                // I really dislike this design tho...
                 *control_flow = ControlFlow::Exit;
             },
             _ => {},

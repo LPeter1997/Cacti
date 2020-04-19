@@ -178,6 +178,8 @@ const WM_QUIT: u32 = 0x0012;
 const WM_DESTROY: u32 = 0x0002;
 const WM_KILLFOCUS: u32 = 0x0008;
 const WM_SETFOCUS: u32 = 0x0007;
+const WM_SIZING: u32 = 0x0214;
+const WM_SIZE: u32 = 0x0005;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -502,6 +504,7 @@ impl Win32Window {
         };
         // Handle events
         let ret = match msg {
+            // Existential messages
             WM_CREATE => {
                 // We have to set the user-pointer
                 let crea = unsafe{ &*(lparam as *const CREATESTRUCTW) };
@@ -518,6 +521,30 @@ impl Win32Window {
                 push_event(window_event(WindowEvent::Closed));
                 unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) }
             },
+            // Focus
+            WM_SETFOCUS => {
+                push_event(window_event(WindowEvent::FocusChanged(true)));
+                0
+            },
+            WM_KILLFOCUS => {
+                push_event(window_event(WindowEvent::FocusChanged(false)));
+                0
+            },
+            // Size
+            WM_SIZING => {
+                let rect = unsafe{ &*(lparam as *const RECT) };
+                let width = rect.width() as u32;
+                let height = rect.height() as u32;
+                push_event(window_event(WindowEvent::Resized{ width, height }));
+                unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) }
+            },
+            WM_SIZE => {
+                let width = (lparam & 0xffff) as u32;
+                let height = (lparam >> 16) as u32;
+                push_event(window_event(WindowEvent::Resized{ width, height }));
+                unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) }
+            },
+            // Others
             _ => unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) },
         };
         // Try emptying the queue
