@@ -172,6 +172,7 @@ const GWLP_USERDATA: i32 = -21;
 
 const PM_NOREMOVE: u32 = 0x0000;
 const PM_REMOVE: u32 = 0x0001;
+const PM_QS_PAINT: u32 = 0x200000;
 
 const LWA_ALPHA: u32 = 0x00000002;
 
@@ -183,6 +184,7 @@ const WM_KILLFOCUS: u32 = 0x0008;
 const WM_SETFOCUS: u32 = 0x0007;
 const WM_SIZING: u32 = 0x0214;
 const WM_SIZE: u32 = 0x0005;
+const WM_PAINT: u32 = 0x000f;
 
 type MONITORENUMPROC =
     Option<extern "system" fn(*mut c_void, *mut c_void, *mut RECT, isize) -> i32>;
@@ -458,29 +460,71 @@ impl EventLoopTrait for Win32EventLoop {
                 data.control_flow = &mut control_flow;
             }
         }
-        // TODO: Emit a QueueCleared event after no more events are available
         // Start looping
         let mut msg = MSG::new();
+        let mut unread = false;
+        let mut pushed_paint;
         loop {
-            // Decide if poll or to wait
-            let poll = control_flow == ControlFlow::Poll;
-            let have_events = unsafe{ if poll {
-                    PeekMessageW(&mut msg, ptr::null_mut(), 0, 0, PM_REMOVE)
+            // Inner loop for events before redraw
+            pushed_paint = false;
+            loop {
+                if !unread {
+                    // We don't have any messages read in
+                    let peek = unsafe{ PeekMessageW(&mut msg, ptr::null_mut(), 0, 0, PM_REMOVE) };
+                    if peek == 0 {
+                        // Consumed all events, done
+                        break;
+                    }
                 }
-                else {
-                    GetMessageW(&mut msg, ptr::null_mut(), 0, 0)
-                } };
-            if have_events != 0 {
                 unsafe{
                     TranslateMessage(&mut msg);
                     DispatchMessageW(&mut msg);
                 }
+                unread = false;
+                if msg.message == WM_PAINT {
+                    // We just ate a paint event, we must not post a LogicUpdate
+                    // explicitly
+                    pushed_paint = true;
+                    break;
+                }
             }
-            // Check exit condition
-            if control_flow == ControlFlow::Exit {
-                break;
+
+            if !pushed_paint {
+                // No paint event happened, we explicitly do a LogicUpdate
+                f(&mut control_flow, Event::LogicUpdate);
+                // The logic update could have enforced a redraw
+                loop {
+                    let ret = unsafe{ PeekMessageW(
+                        &mut msg,
+                        ptr::null_mut(),
+                        WM_PAINT, WM_PAINT,
+                        PM_QS_PAINT | PM_REMOVE) };
+                    if ret == 0 {
+                        break;
+                    }
+                    unsafe{
+                        TranslateMessage(&mut msg);
+                        DispatchMessageW(&mut msg);
+                    }
+                }
+            }
+
+            f(&mut control_flow, Event::AfterRedraw);
+
+            match control_flow {
+                ControlFlow::Exit => break,
+                ControlFlow::Poll => {}, // We already poll at the top
+                ControlFlow::Wait => {
+                    let res = unsafe{ GetMessageW(&mut msg, ptr::null_mut(), 0, 0) };
+                    if res == 0 {
+                        break;
+                    }
+                    unread = true;
+                }
             }
         }
+
+        f(&mut control_flow, Event::LoopExited);
     }
 }
 
@@ -577,6 +621,14 @@ impl Win32Window {
                 let size = PhysicalSize::new(width, height);
                 push_event(window_event(WindowEvent::Resized(size)));
                 unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) }
+            },
+            // Redraw
+            WM_PAINT => {
+                // We push a logic update event before redraw
+                push_event(Event::LogicUpdate);
+                // Redraw event
+                push_event(Event::Redraw(window_id));
+                0
             },
             // Others
             _ => unsafe{ DefWindowProcW(hwnd, msg, wparam, lparam) },

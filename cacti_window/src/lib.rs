@@ -138,7 +138,10 @@ pub enum Event {
         window_id: WindowId,
         event: WindowEvent,
     },
-    QueueCleared,
+    LogicUpdate,
+    Redraw(WindowId),
+    AfterRedraw,
+    LoopExited,
 }
 
 // TODO: Event for DPI/scale changes
