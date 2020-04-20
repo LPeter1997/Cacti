@@ -2,6 +2,9 @@ language: rust
 rust:
   - 1.42.0
 
+env:
+  - RUSTFLAGS='--cfg CI'
+
 notifications:
   email:
     on_success: never
@@ -25,6 +28,5 @@ matrix:
     name: "Tests - Windows"
 
 script:
-  - RUSTFLAGS='--cfg CI'
   - cargo build --verbose --all
   - cargo test --verbose --all
