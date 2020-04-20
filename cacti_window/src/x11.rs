@@ -83,6 +83,12 @@ extern "C" {
         window : c_ulong      ,
         title  : *const c_char,
     ) -> c_int;
+    fn XMoveWindow(
+        display: *mut c_void,
+        window : c_ulong    ,
+        x      : c_int      ,
+        y      : c_int      ,
+    ) -> c_int;
 }
 
 const ExposureMask: c_long = 0x8000;
@@ -102,6 +108,10 @@ const CWEventMask: c_ulong = 1 << 11;
 const CWDontPropagate: c_ulong = 1 << 12;
 const CWColormap: c_ulong = 1 << 13;
 const CWCursor: c_ulong = 1 << 14;
+
+const IsUnmapped: c_int = 0;
+const IsUnviewable: c_int = 1;
+const IsViewable: c_int = 2;
 
 #[repr(C)]
 struct XEvent {
@@ -142,6 +152,31 @@ struct XWindowAttributes {
 }
 
 impl XWindowAttributes {
+    fn new() -> Self {
+        unsafe{ mem::zeroed() }
+    }
+}
+
+#[repr(C)]
+struct XSetWindowAttributes {
+    background_pixmap    : c_ulong,
+    background_pixel     : c_ulong,
+    border_pixmap        : c_ulong,
+    border_pixel         : c_ulong,
+    bit_gravity          : c_int  ,
+    win_gravity          : c_int  ,
+    backing_store        : c_int  ,
+    backing_planes       : c_ulong,
+    backing_pixel        : c_ulong,
+    save_under           : c_int  ,
+    event_mask           : c_long ,
+    do_not_propagate_mask: c_long ,
+    override_redirect    : c_int  ,
+    colormap             : c_ulong,
+    cursor               : c_ulong,
+}
+
+impl XSetWindowAttributes {
     fn new() -> Self {
         unsafe{ mem::zeroed() }
     }
@@ -342,7 +377,7 @@ impl WindowTrait for X11Window {
     }
 
     fn monitor(&self) -> X11Monitor {
-        let attribs = XWindowAttributes::new();
+        let mut attribs = XWindowAttributes::new();
         unsafe{ XGetWindowAttributes(self.srvr.0, self.handle, &mut attribs) };
 
         let handle = attribs.screen;
@@ -374,10 +409,23 @@ impl WindowTrait for X11Window {
     fn set_title(&mut self, title: &str) -> bool {
         let cstr = to_cstring(title);
         unsafe{ XStoreName(self.srvr.0, self.handle, cstr.as_ptr()) };
+        true
     }
 
     fn set_position(&mut self, pos: PhysicalPosition) -> bool {
-        unimplemented!()
+        let is_unmapped = {
+            let mut attribs = XWindowAttributes::new();
+            unsafe{ XGetWindowAttributes(self.srvr.0, self.handle, &mut attribs) };
+            attribs.map_state == IsUnmapped
+        };
+        if is_unmapped {
+            unsafe{ XMapWindow(self.srvr.0, self.handle) };
+        }
+        unsafe{ XMoveWindow(self.srvr.0, self.handle, pos.x, pos.y) };
+        if is_unmapped {
+            unsafe{ XUnmapWindow(self.srvr.0, self.handle) };
+        }
+        true
     }
 
     fn set_inner_size(&mut self, siz: PhysicalSize) -> bool {
