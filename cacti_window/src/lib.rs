@@ -1,5 +1,8 @@
 //! TODO: doc
 
+// NOTE: to allow toi build in CI
+#![cfg(not(CI))]
+
 use std::io;
 use std::ffi::c_void;
 
