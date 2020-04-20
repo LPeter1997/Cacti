@@ -1,4 +1,6 @@
 
+#![cfg(not(CI))]
+
 use cacti_window::*;
 use std::io;
 
