@@ -663,7 +663,7 @@ mod unix {
 
     /// Converts the Rust &OsStr into a C string.
     fn to_cstring(s: &OsStr) -> Vec<c_char> {
-        s.as_bytes().iter().cloned().chain(Some(0).into_iter()).collect()
+        s.as_bytes().iter().cloned().map(|c| c as c_char).chain(Some(0).into_iter()).collect()
     }
 
     /// `trait FsTemp` on Unix systems.
