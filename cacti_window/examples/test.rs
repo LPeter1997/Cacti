@@ -14,8 +14,8 @@ fn main() -> io::Result<()> {
     event_loop.add_window(&wnd);
     /*wnd.set_title("Hello, Window!");
     wnd.set_position(PhysicalPosition::new(100, 100));
-    wnd.set_inner_size(PhysicalSize::new(960, 540));
-    wnd.set_visible(true);*/
+    wnd.set_inner_size(PhysicalSize::new(960, 540));*/
+    wnd.set_visible(true);
 
     event_loop.run(move |control_flow, event| {
         /*println!("{:?}", event);

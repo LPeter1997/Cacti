@@ -38,7 +38,7 @@ extern "C" {
     fn XCreateSimpleWindow(
         display: *mut c_void,
         parent: c_ulong,
-        x: i32, 
+        x: i32,
         y: i32,
         width: u32,
         height: u32,
@@ -49,9 +49,10 @@ extern "C" {
     fn XBlackPixel(display: *mut c_void, screen_idx: i32) -> c_ulong;
     fn XWhitePixel(display: *mut c_void, screen_idx: i32) -> c_ulong;
     fn XMapWindow(display: *mut c_void, window: c_ulong) -> i32;
+    fn XUnmapWindow(display: *mut c_void, window: c_ulong) -> i32;
     fn XNextEvent(display: *mut c_void, event: *mut XEvent) -> i32;
     fn XFillRectangle(
-        display: *mut c_void, 
+        display: *mut c_void,
         drawable: c_ulong,
         gc: *mut c_void,
         x: i32,
@@ -61,10 +62,11 @@ extern "C" {
     ) -> i32;
     fn XDefaultGC(display: *mut c_void, screen_idx: i32) -> *mut c_void;
     fn XSelectInput(
-        display: *mut c_void, 
-        window: c_ulong, 
+        display: *mut c_void,
+        window: c_ulong,
         mask: c_long
     ) -> i32;
+    fn XDestroyWindow(display: *mut c_void, window: c_ulong) -> i32;
 }
 
 const ExposureMask: c_long = 0x8000;
@@ -84,7 +86,7 @@ impl XEvent {
 //                               Implementation                               //
 // ////////////////////////////////////////////////////////////////////////// //
 
-// We need a mechanism to safely store a single display pointer and release it 
+// We need a mechanism to safely store a single display pointer and release it
 // when no longer needed.
 // NOTE: Do we need all this crud?
 
@@ -219,8 +221,8 @@ impl MonitorTrait for X11Monitor {
 pub struct X11EventLoop {}
 
 impl EventLoopTrait for X11EventLoop {
-    fn new() -> Self { 
-        Self{} 
+    fn new() -> Self {
+        Self{}
     }
 
     fn add_window(&mut self, wnd: &WindowImpl) {
@@ -250,19 +252,18 @@ impl WindowTrait for X11Window {
         let black = unsafe{ XBlackPixel(srvr.0, 0) };
         let white = unsafe{ XWhitePixel(srvr.0, 0) };
         let handle = unsafe{ XCreateSimpleWindow(
-            srvr.0, 
-            root, 
-            100, 100, 
-            200, 200, 
+            srvr.0,
+            root,
+            100, 100,
+            200, 200,
             1,
             black, white) };
         unsafe{ XSelectInput(srvr.0, handle, ExposureMask) };
-        unsafe{ XMapWindow(srvr.0, handle) };
         Self{ srvr, handle }
     }
 
     fn close(&mut self) {
-        unimplemented!()
+        unsafe{ XUnmapWindow(self.srvr.0, self.handle) };
     }
 
     fn handle_ptr(&self) -> *mut c_void {
@@ -282,7 +283,12 @@ impl WindowTrait for X11Window {
     }
 
     fn set_visible(&mut self, vis: bool) {
-        unimplemented!()
+        if vis {
+            unsafe{ XMapWindow(self.srvr.0, self.handle) };
+        }
+        else {
+            unsafe{ XUnmapWindow(self.srvr.0, self.handle) };
+        }
     }
 
     fn set_resizable(&mut self, res: bool) -> bool {
