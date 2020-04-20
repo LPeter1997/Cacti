@@ -568,6 +568,11 @@ impl Win32Window {
         Some(data)
     }
 
+    // NOTE: I really dislike the current event ordering of
+    // - LoopDestroyed
+    // - Window.FocusChanged(false)
+    // - Window.Closed
+    // Also it should be more like Window.Destroyed?
     extern "system" fn wnd_proc(hwnd: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> isize {
         let window_id = WindowId(hwnd);
         let window_event = |event: WindowEvent| {
