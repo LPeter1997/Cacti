@@ -25,5 +25,6 @@ matrix:
     name: "Tests - Windows"
 
 script:
-  - cargo build --package fs_watch --verbose --all -- --cfg 'CI'
-  - cargo test --package fs_watch --verbose --all -- --cfg 'CI'
+  - RUSTFLAGS='--cfg CI'
+  - cargo build --verbose --all
+  - cargo test --verbose --all
