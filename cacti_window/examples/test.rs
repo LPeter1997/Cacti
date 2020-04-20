@@ -1,9 +1,8 @@
 
-#![cfg(not(CI))]
-
 use cacti_window::*;
 use std::io;
 
+#[cfg(not(CI))]
 fn main() -> io::Result<()> {
     for monitor in Monitor::all_monitors() {
         println!("name: {:?}, position: {:?}, size: {:?}, DPI: {:?}, scale: {:?}, is primary: {:?}",
@@ -33,4 +32,8 @@ fn main() -> io::Result<()> {
     });
 
     Ok(())
+}
+
+#[cfg(CI)]
+fn main() {
 }
