@@ -20,16 +20,16 @@ fn main() -> io::Result<()> {
     wnd.set_visible(true);
 
     event_loop.run(move |control_flow, event| {
-        /*println!("{:?}", event);
+        println!("{:?}", event);
 
         match event {
             Event::WindowEvent{ window_id: _, event: WindowEvent::CloseRequested } => {
-                wnd.close();
+                //wnd.close();
                 // I really dislike this design tho...
                 *control_flow = ControlFlow::Exit;
             },
             _ => {},
-        }*/
+        }
     });
 
     Ok(())

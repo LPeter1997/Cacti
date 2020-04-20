@@ -138,6 +138,7 @@ pub enum Event {
         window_id: WindowId,
         event: WindowEvent,
     },
+    QueueCleared,
 }
 
 // TODO: Event for DPI/scale changes

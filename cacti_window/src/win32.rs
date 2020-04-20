@@ -170,6 +170,7 @@ const GWL_EXSTYLE: i32 = -20;
 const GWLP_WNDPROC: i32 = -4;
 const GWLP_USERDATA: i32 = -21;
 
+const PM_NOREMOVE: u32 = 0x0000;
 const PM_REMOVE: u32 = 0x0001;
 
 const LWA_ALPHA: u32 = 0x00000002;
@@ -183,7 +184,7 @@ const WM_SETFOCUS: u32 = 0x0007;
 const WM_SIZING: u32 = 0x0214;
 const WM_SIZE: u32 = 0x0005;
 
-type MONITORENUMPROC = 
+type MONITORENUMPROC =
     Option<extern "system" fn(*mut c_void, *mut c_void, *mut RECT, isize) -> i32>;
 
 type WNDPROC =
@@ -457,6 +458,7 @@ impl EventLoopTrait for Win32EventLoop {
                 data.control_flow = &mut control_flow;
             }
         }
+        // TODO: Emit a QueueCleared event after no more events are available
         // Start looping
         let mut msg = MSG::new();
         loop {
