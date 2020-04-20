@@ -645,10 +645,6 @@ impl WindowTrait for Win32Window {
         }
     }
 
-    fn close(&mut self) {
-        unsafe{ ShowWindow(self.hwnd, SW_HIDE) };
-    }
-
     fn handle_ptr(&self) -> *mut c_void { self.hwnd }
 
     fn monitor(&self) -> Win32Monitor {

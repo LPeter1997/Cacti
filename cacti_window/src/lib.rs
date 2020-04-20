@@ -67,7 +67,6 @@ pub struct Window(WindowImpl);
 
 impl Window {
     pub fn new() -> Self { Self(WindowImpl::new()) }
-    pub fn close(&mut self) { self.0.close(); }
 
     pub fn id(&self) -> WindowId { WindowId(self.handle_ptr()) }
     pub fn handle_ptr(&self) -> *const c_void { self.0.handle_ptr() }
@@ -271,7 +270,6 @@ trait EventLoopTrait {
 
 trait WindowTrait: Sized {
     fn new() -> Self;
-    fn close(&mut self);
 
     fn handle_ptr(&self) -> *mut c_void;
 

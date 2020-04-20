@@ -394,9 +394,7 @@ pub struct X11Window {
     srvr: Connection,
     handle: c_ulong,
     resizable: bool,
-    // NOTE: We can change to PhysicalSize and get rid of Option
-    // Also we need to update this in the loop!
-    last_size: Option<(u32, u32)>,
+    inner_size: PhysicalSize,
 }
 
 impl WindowTrait for X11Window {
@@ -406,19 +404,21 @@ impl WindowTrait for X11Window {
         let root = unsafe{ XRootWindowOfScreen(screen) };
         let black = unsafe{ XBlackPixel(srvr.0, 0) };
         let white = unsafe{ XWhitePixel(srvr.0, 0) };
+        let inner_size = PhysicalSize::new(200, 200);
         let handle = unsafe{ XCreateSimpleWindow(
             srvr.0,
             root,
             100, 100,
-            200, 200,
+            inner_size.width, inner_size.height,
             1,
             black, white) };
         unsafe{ XSelectInput(srvr.0, handle, ExposureMask) };
-        Self{ srvr, handle, resizable: true, last_size: None, }
-    }
-
-    fn close(&mut self) {
-        unsafe{ XUnmapWindow(self.srvr.0, self.handle) };
+        Self{ 
+            srvr, 
+            handle, 
+            resizable: true, 
+            inner_size,
+        }
     }
 
     fn handle_ptr(&self) -> *mut c_void {
@@ -435,7 +435,7 @@ impl WindowTrait for X11Window {
     }
 
     fn inner_size(&self) -> PhysicalSize {
-        unimplemented!()
+        self.inner_size
     }
 
     fn outer_size(&self) -> PhysicalSize {
@@ -457,16 +457,13 @@ impl WindowTrait for X11Window {
         let mut hints = unsafe{ &mut *hints_ptr };
 
         if !res {
-            let siz = self.last_size.unwrap_or_else(|| {
-                let mut attribs = XWindowAttributes::new();
-                unsafe{ XGetWindowAttributes(self.srvr.0, self.handle, &mut attribs) };
-                (attribs.width as u32, attribs.height as u32)
-            });
+            let width = self.inner_size.width as i32;
+            let height = self.inner_size.height as i32;
             hints.flags = PMinSize | PMaxSize;
-            hints.min_width = siz.0 as i32;
-            hints.max_width = siz.0 as i32;
-            hints.min_height = siz.1 as i32;
-            hints.max_height = siz.1 as i32;
+            hints.min_width = width;
+            hints.max_width = width;
+            hints.min_height = height;
+            hints.max_height = height;
         }
 
         unsafe{ XSetWMNormalHints(self.srvr.0, self.handle, hints_ptr) };
@@ -497,7 +494,7 @@ impl WindowTrait for X11Window {
     }
 
     fn set_inner_size(&mut self, siz: PhysicalSize) -> bool {
-        self.last_size = Some((siz.width, siz.height));
+        self.inner_size = siz;
         unsafe{ XResizeWindow(self.srvr.0, self.handle, siz.width, siz.height) };
         // NOTE: Workaround, because it looks like without processing events, 
         // X11 keeps reporting the old sizes, so set_resizable locks to the old 
