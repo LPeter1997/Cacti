@@ -527,11 +527,7 @@ mod win32 {
 
     #[link(name = "kernel32")]
     extern "system" {
-        fn GetTempPathW(
-            buffer_len: u32     ,
-            buffer    : *mut u16,
-        ) -> u32;
-
+        fn GetTempPathW(buffer_len: u32, buffer: *mut u16) -> u32;
         fn CreateFileW(
             name     : *const u16 ,
             access   : u32        ,
@@ -541,14 +537,8 @@ mod win32 {
             attribs  : u32        ,
             template : *mut c_void,
         ) -> *mut c_void;
-
-        fn CreateDirectoryW(
-            name    : *const u16 ,
-            security: *mut c_void,
-        ) -> i32;
-
+        fn CreateDirectoryW(name: *const u16, security: *mut c_void) -> i32;
         fn CloseHandle(handle: *mut c_void) -> i32;
-
         fn GetCurrentThreadId() -> u32;
     }
 
@@ -661,17 +651,18 @@ mod win32 {
 #[cfg(target_family = "unix")]
 mod unix {
     use std::ffi::OsStr;
+    use std::os::raw::c_char;
     use std::os::unix::ffi::OsStrExt;
     use super::*;
 
     #[link(name = "c")]
     extern "C" {
-        fn getpid() -> i32;
-        fn unlink(pathname: *const u8);
+        fn getpid() -> i32; // pid_t == i32
+        fn unlink(pathname: *const c_char);
     }
 
-    /// Converts the Rust &OsStr into a C conar*.
-    fn to_cstring(s: &OsStr) -> Vec<u8> {
+    /// Converts the Rust &OsStr into a C string.
+    fn to_cstring(s: &OsStr) -> Vec<c_char> {
         s.as_bytes().iter().cloned().chain(Some(0).into_iter()).collect()
     }
 

@@ -21,10 +21,10 @@ extern "system" {
 extern "system" {
     // Monitor stuff
     fn EnumDisplayMonitors(
-        hdc: *mut c_void,
-        clip_rect: *mut RECT,
-        proc: Option<extern "system" fn(*mut c_void, *mut c_void, *mut RECT, isize) -> i32>,
-        data: isize,
+        hdc      : *mut c_void    ,
+        clip_rect: *mut RECT      ,
+        proc     : MONITORENUMPROC,
+        data     : isize          ,
     ) -> i32;
     fn GetMonitorInfoW(hmonitor: *mut c_void, info: *mut MONITORINFOEXW) -> i32;
     fn MonitorFromWindow(hwnd: *mut c_void, flags: u32) -> *mut c_void;
@@ -32,43 +32,43 @@ extern "system" {
     fn RegisterClassW(class: *const WNDCLASSW) -> u16;
     // Window creation
     fn CreateWindowExW(
-        ex_style: u32,
-        class_name: *const u16,
-        window_name: *const u16,
-        style: u32,
-        x: i32,
-        y: i32,
-        width: i32,
-        height: i32,
-        parent: *mut c_void,
-        menu: *mut c_void,
-        hinstance: *mut c_void,
-        param: *mut c_void,
+        ex_style   : u32        ,
+        class_name : *const u16 ,
+        window_name: *const u16 ,
+        style      : u32        ,
+        x          : i32        ,
+        y          : i32        ,
+        width      : i32        ,
+        height     : i32        ,
+        parent     : *mut c_void,
+        menu       : *mut c_void,
+        hinstance  : *mut c_void,
+        param      : *mut c_void,
     ) -> *mut c_void;
     fn DestroyWindow(hwnd: *mut c_void) -> i32;
     // Window attributes
     fn ShowWindow(hwnd: *mut c_void, cmd: i32) -> i32;
     fn SetWindowTextW(hwnd: *mut c_void, title: *const u16) -> i32;
     fn SetWindowPos(
-        hwnd: *mut c_void,
+        hwnd      : *mut c_void,
         hwnd_after: *mut c_void,
-        x: i32,
-        y: i32,
-        w: i32,
-        h: i32,
-        flags: u32,
+        x         : i32        ,
+        y         : i32        ,
+        w         : i32        ,
+        h         : i32        ,
+        flags     : u32        ,
     ) -> i32;
     fn SetLayeredWindowAttributes(
-        hwnd: *mut c_void,
-        color: u32,
-        alpha: u8,
-        flags: u32,
+        hwnd : *mut c_void,
+        color: u32        ,
+        alpha: u8         ,
+        flags: u32        ,
     ) -> i32;
     fn AdjustWindowRectEx(
-        rect: *mut RECT,
-        style: u32,
-        menu: i32,
-        ex_style: u32,
+        rect    : *mut RECT,
+        style   : u32      ,
+        menu    : i32      ,
+        ex_style: u32      ,
     ) -> i32;
     fn GetWindowRect(hwnd: *mut c_void, rect: *mut RECT) -> i32;
     fn GetClientRect(hwnd: *mut c_void, rect: *mut RECT) -> i32;
@@ -80,29 +80,29 @@ extern "system" {
     fn GetWindowLongPtrW(hwnd: *mut c_void, index: i32) -> isize;
     // Event handling
     fn DefWindowProcW(
-        hwnd: *mut c_void,
-        msg: u32,
-        wparam: usize,
-        lparam: isize,
+        hwnd  : *mut c_void,
+        msg   : u32        ,
+        wparam: usize      ,
+        lparam: isize      ,
     ) -> isize;
     fn GetMessageW(
-        msg: *mut MSG,
+        msg : *mut MSG   ,
         hwnd: *mut c_void,
-        min: u32,
-        max: u32,
+        min : u32        ,
+        max : u32        ,
     ) -> i32;
     fn PeekMessageW(
-        msg: *mut MSG,
-        hwnd: *mut c_void,
-        min: u32,
-        max: u32,
-        action: u32,
+        msg   : *mut MSG   ,
+        hwnd  : *mut c_void,
+        min   : u32        ,
+        max   : u32        ,
+        action: u32        ,
     ) -> i32;
     fn SendMessageW(
-        hwnd: *mut c_void,
-        msg: u32,
-        wparam: usize,
-        lparam: isize,
+        hwnd  : *mut c_void,
+        msg   : u32        ,
+        wparam: usize      ,
+        lparam: isize      ,
     ) -> isize;
     fn PostQuitMessage(code: i32);
     fn TranslateMessage(msg: *const MSG) -> i32;
@@ -113,9 +113,9 @@ extern "system" {
 extern "system" {
     fn GetDpiForMonitor(
         hmonitor: *mut c_void,
-        dpity: u32,
-        dpix: *mut u32,
-        dpiy: *mut u32,
+        dpity   : u32        ,
+        dpix    : *mut u32   ,
+        dpiy    : *mut u32   ,
     ) -> i32;
     fn GetScaleFactorForMonitor(hmonitor: *mut c_void, factor: *mut u32) -> i32;
 }
@@ -183,6 +183,12 @@ const WM_SETFOCUS: u32 = 0x0007;
 const WM_SIZING: u32 = 0x0214;
 const WM_SIZE: u32 = 0x0005;
 
+type MONITORENUMPROC = 
+    Option<extern "system" fn(*mut c_void, *mut c_void, *mut RECT, isize) -> i32>;
+
+type WNDPROC =
+    Option<extern "system" fn(*mut c_void, u32, usize, isize) -> isize>;
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 struct RECT {
@@ -219,10 +225,10 @@ impl MONITORINFO {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 struct MONITORINFOEXW {
-    cb_size     : u32 ,
-    monitor_rect: RECT,
-    work_rect   : RECT,
-    flags       : u32 ,
+    cb_size     : u32      ,
+    monitor_rect: RECT     ,
+    work_rect   : RECT     ,
+    flags       : u32      ,
     dev_name    : [u16; 32],
 }
 
@@ -237,16 +243,16 @@ impl MONITORINFOEXW {
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct WNDCLASSW {
-    style      : u32,
-    wnd_proc   : Option<extern "system" fn(*mut c_void, u32, usize, isize) -> isize>,
-    cls_extra  : i32,
-    wnd_extra  : i32,
+    style      : u32        ,
+    wnd_proc   : WNDPROC    ,
+    cls_extra  : i32        ,
+    wnd_extra  : i32        ,
     hinstance  : *mut c_void,
     hicon      : *mut c_void,
     hcursor    : *mut c_void,
     hbackground: *mut c_void,
-    menu_name  : *const u16,
-    class_name : *const u16,
+    menu_name  : *const u16 ,
+    class_name : *const u16 ,
 }
 
 impl WNDCLASSW {
@@ -263,13 +269,13 @@ struct POINT {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 struct MSG {
-    hwnd: *mut c_void,
-    message: u32,
-    wparam: usize,
-    lparam: isize,
-    time: u32,
-    point: POINT,
-    private: u32,
+    hwnd   : *mut c_void,
+    message: u32        ,
+    wparam : usize      ,
+    lparam : isize      ,
+    time   : u32        ,
+    point  : POINT      ,
+    private: u32        ,
 }
 
 impl MSG {
@@ -279,13 +285,13 @@ impl MSG {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 struct WINDOWPLACEMENT {
-    length: u32,
-    flags: u32,
-    show: u32,
-    min: POINT,
-    max: POINT,
-    normal_pos: RECT,
-    device: RECT,
+    length    : u32  ,
+    flags     : u32  ,
+    show      : u32  ,
+    min       : POINT,
+    max       : POINT,
+    normal_pos: RECT ,
+    device    : RECT ,
 }
 
 impl WINDOWPLACEMENT {
@@ -298,18 +304,18 @@ impl WINDOWPLACEMENT {
 
 #[repr(C)]
 struct CREATESTRUCTW {
-    param: *mut c_void,
+    param    : *mut c_void,
     hinstance: *mut c_void,
-    menu: *mut c_void,
-    parent: *mut c_void,
-    height: i32,
-    width: i32,
-    y: i32,
-    x: i32,
-    style: i32,
-    name: *const u16,
-    class: *const u16,
-    exstyle: u32,
+    menu     : *mut c_void,
+    parent   : *mut c_void,
+    height   : i32        ,
+    width    : i32        ,
+    y        : i32        ,
+    x        : i32        ,
+    style    : i32        ,
+    name     : *const u16 ,
+    class    : *const u16 ,
+    exstyle  : u32        ,
 }
 
 /// Converts the Rust &OsStr into a WinAPI `WCHAR` string.

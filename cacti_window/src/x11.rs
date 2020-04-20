@@ -2,7 +2,7 @@
 #![cfg(target_os = "linux")]
 
 use std::ffi::c_void;
-use std::os::raw::{c_char, c_long, c_ulong};
+use std::os::raw::{c_char, c_int, c_uint, c_long, c_ulong};
 use std::cell::RefCell;
 use std::ptr;
 use std::mem;
@@ -15,58 +15,58 @@ use super::*;
 #[link(name = "X11")]
 extern "C" {
     fn XOpenDisplay(name: *const c_char) -> *mut c_void;
-    fn XCloseDisplay(display: *mut c_void) -> i32;
-    fn XScreenCount(display: *mut c_void) -> i32;
-    fn XScreenOfDisplay(display: *mut c_void, index: i32) -> *mut c_void;
-    fn XWidthOfScreen(screen: *mut c_void) -> i32;
-    fn XHeightOfScreen(screen: *mut c_void) -> i32;
+    fn XCloseDisplay(display: *mut c_void) -> c_int;
+    fn XScreenCount(display: *mut c_void) -> c_int;
+    fn XScreenOfDisplay(display: *mut c_void, index: c_int) -> *mut c_void;
+    fn XWidthOfScreen(screen: *mut c_void) -> c_int;
+    fn XHeightOfScreen(screen: *mut c_void) -> c_int;
     fn XDefaultScreenOfDisplay(display: *mut c_void) -> *mut c_void;
     fn XRootWindowOfScreen(screen: *mut c_void) -> c_ulong;
     fn XGetGeometry(
-        display: *mut c_void,
-        drawable: c_ulong,
-        root: *mut u32,
-        xpos: *mut i32,
-        ypos: *mut i32,
-        width: *mut u32,
-        height: *mut u32,
-        border: *mut u32,
-        depth: *mut u32,
-    ) -> i32;
-    fn XWidthMMOfScreen(screen: *mut c_void) -> i32;
-    fn XHeightMMOfScreen(screen: *mut c_void) -> i32;
+        display : *mut c_void ,
+        drawable: c_ulong     ,
+        root    : *mut c_ulong,
+        xpos    : *mut c_int  ,
+        ypos    : *mut c_int  ,
+        width   : *mut c_uint ,
+        height  : *mut c_uint ,
+        border  : *mut c_uint ,
+        depth   : *mut c_uint ,
+    ) -> c_int;
+    fn XWidthMMOfScreen(screen: *mut c_void) -> c_int;
+    fn XHeightMMOfScreen(screen: *mut c_void) -> c_int;
     fn XCreateSimpleWindow(
-        display: *mut c_void,
-        parent: c_ulong,
-        x: i32,
-        y: i32,
-        width: u32,
-        height: u32,
-        border_width: u32,
-        border: c_ulong,
-        background: c_ulong,
+        display     : *mut c_void,
+        parent      : c_ulong    ,
+        x           : c_int      ,
+        y           : c_int      ,
+        width       : c_uint     ,
+        height      : c_uint     ,
+        border_width: c_uint     ,
+        border      : c_ulong    ,
+        background  : c_ulong    ,
     ) -> c_ulong;
-    fn XBlackPixel(display: *mut c_void, screen_idx: i32) -> c_ulong;
-    fn XWhitePixel(display: *mut c_void, screen_idx: i32) -> c_ulong;
-    fn XMapWindow(display: *mut c_void, window: c_ulong) -> i32;
-    fn XUnmapWindow(display: *mut c_void, window: c_ulong) -> i32;
-    fn XNextEvent(display: *mut c_void, event: *mut XEvent) -> i32;
+    fn XBlackPixel(display: *mut c_void, screen_idx: c_int) -> c_ulong;
+    fn XWhitePixel(display: *mut c_void, screen_idx: c_int) -> c_ulong;
+    fn XMapWindow(display: *mut c_void, window: c_ulong) -> c_int;
+    fn XUnmapWindow(display: *mut c_void, window: c_ulong) -> c_int;
+    fn XNextEvent(display: *mut c_void, event: *mut XEvent) -> c_int;
     fn XFillRectangle(
-        display: *mut c_void,
-        drawable: c_ulong,
-        gc: *mut c_void,
-        x: i32,
-        y: i32,
-        width: u32,
-        height: u32,
-    ) -> i32;
-    fn XDefaultGC(display: *mut c_void, screen_idx: i32) -> *mut c_void;
+        display : *mut c_void,
+        drawable: c_ulong    ,
+        gc      : *mut c_void,
+        x       : c_int      ,
+        y       : c_int      ,
+        width   : c_uint     ,
+        height  : c_uint     ,
+    ) -> c_int;
+    fn XDefaultGC(display: *mut c_void, screen_idx: c_int) -> *mut c_void;
     fn XSelectInput(
         display: *mut c_void,
-        window: c_ulong,
-        mask: c_long
-    ) -> i32;
-    fn XDestroyWindow(display: *mut c_void, window: c_ulong) -> i32;
+        window : c_ulong    ,
+        mask   : c_long     ,
+    ) -> c_int;
+    fn XDestroyWindow(display: *mut c_void, window: c_ulong) -> c_int;
 }
 
 const ExposureMask: c_long = 0x8000;

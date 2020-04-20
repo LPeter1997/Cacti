@@ -624,7 +624,38 @@ mod win32 {
     use std::os::windows::ffi::OsStrExt;
     use std::mem;
     use std::ptr;
+    use std::io;
     use super::*;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateFileW(
+            file_name : *const u16 ,
+            access    : u32        ,
+            share_mode: u32        ,
+            security  : *mut c_void,
+            crea_disp : u32        ,
+            attr_flags: u32        ,
+            template  : *mut c_void,
+        ) -> *mut c_void;
+        fn CloseHandle(
+            handle: *mut c_void,
+        ) -> i32;
+        fn ReadDirectoryChangesW(
+            directory_handle: *mut c_void                ,
+            res_buffer      : *mut c_void                ,
+            res_buffer_len  : u32                        ,
+            recursive       : i32                        ,
+            filter          : u32                        ,
+            bytes_written   : *mut u32                   ,
+            overlapped      : *mut OVERLAPPED            ,
+            callback        : OverlappedCompletionRoutine,
+        ) -> i32;
+        fn SleepEx(
+            millis   : u32,
+            alertable: i32,
+        ) -> u32;
+    }
 
     // Error type
     const ERROR_SUCCESS: u32 = 0;
@@ -648,12 +679,12 @@ mod win32 {
     const INVALID_HANDLE_VALUE: *mut c_void = -1isize as *mut c_void;
 
     type OverlappedCompletionRoutine =
-        Option<unsafe extern "system" fn(u32, u32, *mut c_void)>;
+        Option<unsafe extern "system" fn(u32, u32, *mut OVERLAPPED)>;
 
     #[repr(C)]
     struct OVERLAPPED {
-        Internal    : u64        ,
-        InternalHigh: u64        ,
+        Internal    : usize      ,
+        InternalHigh: usize      ,
         Offset      : u32        ,
         OffsetHigh  : u32        ,
         hEvent      : *mut c_void,
@@ -671,47 +702,6 @@ mod win32 {
         Action         : u32     ,
         FileNameLength : u32     ,
         FileName       : *mut u16,
-    }
-
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn GetLastError() -> u32;
-
-        fn CreateFileW(
-            file_name : *const u16 ,
-            access    : u32        ,
-            share_mode: u32        ,
-            security  : *mut c_void,
-            crea_disp : u32        ,
-            attr_flags: u32        ,
-            template  : *mut c_void,
-        ) -> *mut c_void;
-
-        fn CloseHandle(
-            handle: *mut c_void,
-        ) -> i32;
-
-        fn ReadDirectoryChangesW(
-            directory_handle: *mut c_void                ,
-            res_buffer      : *mut c_void                ,
-            res_buffer_len  : u32                        ,
-            recursive       : i32                        ,
-            filter          : u32                        ,
-            bytes_written   : *mut u32                   ,
-            overlapped      : *mut OVERLAPPED            ,
-            callback        : OverlappedCompletionRoutine,
-        ) -> i32;
-
-        fn SleepEx(
-            millis   : u32,
-            alertable: i32,
-        ) -> u32;
-    }
-
-    /// Returns the last OS error represented as an `io::Error`.
-    fn last_error() -> io::Error {
-        let error = unsafe { GetLastError() };
-        io::Error::from_raw_os_error(error as i32)
     }
 
     /// Converts the Rust &OsStr into a WinAPI WCHAR string.
@@ -736,7 +726,7 @@ mod win32 {
             FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
             ptr::null_mut()) };
         if handle == INVALID_HANDLE_VALUE {
-            Err(last_error())
+            Err(io::Error::last_os_error())
         }
         else {
             Ok(handle)
@@ -794,7 +784,7 @@ mod win32 {
             &mut bw,
             &mut overlapped,
             callback) } == 0 {
-            Err(last_error())
+            Err(io::Error::last_os_error())
         }
         else {
             Ok(())

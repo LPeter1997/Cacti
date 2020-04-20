@@ -256,7 +256,6 @@ mod win32 {
     #![allow(non_snake_case)]
 
     use std::ffi::{OsStr, CString, c_void};
-    use std::os::raw::c_char;
     use std::os::windows::ffi::OsStrExt;
     use std::ptr;
     use std::io;
@@ -265,13 +264,8 @@ mod win32 {
     #[link(name = "kernel32")]
     extern "system" {
         fn LoadLibraryW(name: *const u16) -> *mut c_void;
-
         fn FreeLibrary(hmodule: *mut c_void) -> i32;
-
-        fn GetProcAddress(
-            hmodule: *mut c_void  ,
-            name   : *const c_char,
-        ) -> *mut c_void;
+        fn GetProcAddress(hmodule: *mut c_void, name: *const i8) -> *mut c_void;
     }
 
     /// Converts the Rust &OsStr into a WinAPI `WCHAR` string.
@@ -325,7 +319,7 @@ mod win32 {
 #[cfg(target_family = "unix")]
 mod unix {
     use std::ffi::{CString, c_void};
-    use std::os::raw::c_char;
+    use std::os::raw::{c_char, c_int};
     use std::os::unix::ffi::OsStrExt;
     use std::io;
     use std::ptr;
@@ -335,10 +329,10 @@ mod unix {
 
     #[link(name = "c")]
     extern "C" {
-        fn dlopen(fname: *const c_char, flag: i32) -> *mut c_void;
+        fn dlopen(fname: *const c_char, flag: c_int) -> *mut c_void;
         fn dlerror() -> *mut c_char;
         fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
-        fn dlclose(handle: *mut c_void) -> i32;
+        fn dlclose(handle: *mut c_void) -> c_int;
     }
 
     #[derive(Debug)]

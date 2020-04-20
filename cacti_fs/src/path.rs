@@ -172,17 +172,18 @@ mod linux {
 #[cfg(target_os = "macos")]
 mod macos {
     use std::ffi::OsString;
+    use std::os::raw::c_int;
     use std::os::unix::io::AsRawFd;
     use std::os::unix::ffi::OsStringExt;
     use std::io::{Error, ErrorKind};
     use super::*;
 
-    const PATH_MAX: i32 = 4096;
-    const F_GETPATH: i32 = 50;
+    const PATH_MAX: c_int = 4096;
+    const F_GETPATH: c_int = 50;
 
     #[link(name = "c")]
     extern "C" {
-        fn fcntl(fd: i32, cmd: i32, ...) -> i32;
+        fn fcntl(fd: c_int, cmd: c_int, ...) -> c_int;
     }
 
     pub fn path_for(file: &File) -> Result<PathBuf> {
