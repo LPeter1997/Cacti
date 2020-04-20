@@ -67,9 +67,41 @@ extern "C" {
         mask   : c_long     ,
     ) -> c_int;
     fn XDestroyWindow(display: *mut c_void, window: c_ulong) -> c_int;
+    fn XGetWindowAttributes(
+        display: *mut c_void           ,
+        window : c_ulong               ,
+        attribs: *mut XWindowAttributes,
+    ) -> c_int;
+    fn XChangeWindowAttributes(
+        display: *mut c_void              ,
+        window : c_ulong                  ,
+        mask   : c_ulong                  ,
+        attribs: *mut XSetWindowAttributes,
+    ) -> c_int;
+    fn XStoreName(
+        display: *mut c_void  ,
+        window : c_ulong      ,
+        title  : *const c_char,
+    ) -> c_int;
 }
 
 const ExposureMask: c_long = 0x8000;
+
+const CWBackPixmap: c_ulong = 1 << 0;
+const CWBackPixel: c_ulong = 1 << 1;
+const CWBorderPixmap: c_ulong = 1 << 2;
+const CWBorderPixel: c_ulong = 1 << 3;
+const CWBitGravity: c_ulong = 1 << 4;
+const CWWinGravity: c_ulong = 1 << 5;
+const CWBackingStore: c_ulong = 1 << 6;
+const CWBackingPlanes: c_ulong = 1 << 7;
+const CWBackingPixel: c_ulong = 1 << 8;
+const CWOverrideRedirect: c_ulong = 1 << 9;
+const CWSaveUnder: c_ulong = 1 << 10;
+const CWEventMask: c_ulong = 1 << 11;
+const CWDontPropagate: c_ulong = 1 << 12;
+const CWColormap: c_ulong = 1 << 13;
+const CWCursor: c_ulong = 1 << 14;
 
 #[repr(C)]
 struct XEvent {
@@ -80,6 +112,45 @@ impl XEvent {
     fn new() -> Self {
         unsafe{ mem::zeroed() }
     }
+}
+
+#[repr(C)]
+struct XWindowAttributes {
+    x                    : c_int      ,
+    y                    : c_int      ,
+    width                : c_int      ,
+    height               : c_int      ,
+    border_width         : c_int      ,
+    depth                : c_int      ,
+    visual               : *mut c_void,
+    root                 : c_ulong    ,
+    class                : c_int      ,
+    bit_gravity          : c_int      ,
+    win_gravity          : c_int      ,
+    backing_store        : c_int      ,
+    backing_planes       : c_ulong    ,
+    backing_pixel        : c_ulong    ,
+    save_under           : c_int      ,
+    colormap             : c_ulong    ,
+    map_installed        : c_int      ,
+    map_state            : c_int      ,
+    all_event_masks      : c_long     ,
+    your_event_mask      : c_long     ,
+    do_not_propagate_mask: c_long     ,
+    override_redirect    : c_int      ,
+    screen               : *mut c_void,
+}
+
+impl XWindowAttributes {
+    fn new() -> Self {
+        unsafe{ mem::zeroed() }
+    }
+}
+
+// TODO: Review all of these to_... functions, check CStr and such
+/// Converts the Rust &str into a C string.
+fn to_cstring(s: &str) -> Vec<c_char> {
+    s.as_bytes().iter().cloned().map(|c| c as c_char).chain(Some(0).into_iter()).collect()
 }
 
 // ////////////////////////////////////////////////////////////////////////// //
@@ -270,8 +341,13 @@ impl WindowTrait for X11Window {
         self.handle as *mut c_void
     }
 
-    fn monitor(&self) -> MonitorImpl {
-        unimplemented!()
+    fn monitor(&self) -> X11Monitor {
+        let attribs = XWindowAttributes::new();
+        unsafe{ XGetWindowAttributes(self.srvr.0, self.handle, &mut attribs) };
+
+        let handle = attribs.screen;
+        let srvr = self.srvr.clone();
+        X11Monitor{ srvr, handle }
     }
 
     fn inner_size(&self) -> PhysicalSize {
@@ -296,7 +372,8 @@ impl WindowTrait for X11Window {
     }
 
     fn set_title(&mut self, title: &str) -> bool {
-        unimplemented!()
+        let cstr = to_cstring(title);
+        unsafe{ XStoreName(self.srvr.0, self.handle, cstr.as_ptr()) };
     }
 
     fn set_position(&mut self, pos: PhysicalPosition) -> bool {
