@@ -16,6 +16,7 @@ fn main() -> io::Result<()> {
     wnd.set_title("Hello, Window!");
     /*wnd.set_inner_size(PhysicalSize::new(960, 540));*/
     wnd.set_position(PhysicalPosition::new(400, 600));
+    wnd.set_resizable(false);
     wnd.set_visible(true);
 
     event_loop.run(move |control_flow, event| {

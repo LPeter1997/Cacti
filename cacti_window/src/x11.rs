@@ -89,6 +89,13 @@ extern "C" {
         x      : c_int      ,
         y      : c_int      ,
     ) -> c_int;
+    fn XAllocSizeHints() -> *mut XSizeHints;
+    fn XFree(data: *mut c_void) -> c_int;
+    fn XSetWMNormalHints(
+        display: *mut c_void    ,
+        window : c_ulong        ,
+        hints  : *mut XSizeHints,
+    );
 }
 
 const ExposureMask: c_long = 0x8000;
@@ -112,6 +119,17 @@ const CWCursor: c_ulong = 1 << 14;
 const IsUnmapped: c_int = 0;
 const IsUnviewable: c_int = 1;
 const IsViewable: c_int = 2;
+
+const USPosition: c_long = 1 << 0;
+const USSize: c_long = 1 << 1;
+const PPosition: c_long = 1 << 2;
+const PSize: c_long = 1 << 3;
+const PMinSize: c_long = 1 << 4;
+const PMaxSize: c_long = 1 << 5;
+const PResizeInc: c_long = 1 << 6;
+const PAspect: c_long = 1 << 7;
+const PBaseSize: c_long = 1 << 8;
+const PWinGravity: c_long =	1 << 9;
 
 #[repr(C)]
 struct XEvent {
@@ -180,6 +198,27 @@ impl XSetWindowAttributes {
     fn new() -> Self {
         unsafe{ mem::zeroed() }
     }
+}
+
+struct XSizeHints {
+    flags           : c_long,
+    x               : c_int ,
+    y               : c_int ,
+    width           : c_int ,
+    height          : c_int ,
+    min_width       : c_int ,
+    min_height      : c_int ,
+    max_width       : c_int ,
+    max_height      : c_int ,
+    width_inc       : c_int ,
+    height_inc      : c_int ,
+    min_aspect_nom  : c_int ,
+    min_aspect_denom: c_int ,
+    max_aspect_nom  : c_int ,
+    max_aspect_denom: c_int ,
+    base_width      : c_int ,
+    base_height     : c_int ,
+    win_gravity     : c_int ,
 }
 
 // TODO: Review all of these to_... functions, check CStr and such
@@ -403,7 +442,22 @@ impl WindowTrait for X11Window {
     }
 
     fn set_resizable(&mut self, res: bool) -> bool {
-        unimplemented!()
+        let mut hints_ptr = unsafe{ XAllocSizeHints() };
+        let mut hints = unsafe{ &mut *hints_ptr };
+
+        if !res {
+            hints.flags = PMinSize | PMaxSize;
+            let mut attribs = XWindowAttributes::new();
+            unsafe{ XGetWindowAttributes(self.srvr.0, self.handle, &mut attribs) };
+            hints.min_width = attribs.width;
+            hints.max_width = attribs.width;
+            hints.min_height = attribs.height;
+            hints.max_height = attribs.height;
+        }
+
+        unsafe{ XSetWMNormalHints(self.srvr.0, self.handle, hints_ptr) };
+        unsafe{ XFree(hints_ptr as *mut c_void) };
+        true
     }
 
     fn set_title(&mut self, title: &str) -> bool {
