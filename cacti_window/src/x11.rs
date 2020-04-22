@@ -111,6 +111,7 @@ const ExposureMask: c_long = 0x8000;
 const StructureNotifyMask: c_long = 0x20000;
 const SubstructureNotifyMask: c_long = 0x80000;
 const FocusChangeMask: c_long = 0x200000;
+const ResizeRedirectMask: c_long = 0x40000;
 
 const CWBackPixmap: c_ulong = 1 << 0;
 const CWBackPixel: c_ulong = 1 << 1;
@@ -147,6 +148,7 @@ const CreateNotify: c_int = 16;
 const DestroyNotify: c_int = 17;
 const FocusIn: c_int = 9;
 const FocusOut: c_int = 10;
+const ResizeRequest: c_int = 25;
 
 const QueuedAlready: c_int = 0;
 
@@ -156,6 +158,7 @@ union XEvent {
     create_notify: XCreateWindowEvent,
     destroy_notify: XDestroyWindowEvent,
     focus: XFocusChangeEvent,
+    resize: XResizeRequestEvent,
     pad: [c_long; 24],
 }
 
@@ -203,6 +206,18 @@ struct XFocusChangeEvent {
 	window: c_ulong,
 	mode: c_int,
 	detail: c_int,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct XResizeRequestEvent {
+	ty: c_int,
+	serial: c_ulong,
+	send_event: c_int,
+	display: *mut c_void,
+    window: c_ulong,
+    width: c_int,
+    height: c_int,
 }
 
 #[repr(C)]
@@ -487,6 +502,13 @@ impl EventLoopTrait for X11EventLoop {
                         let window_id = WindowId(focus.window as *mut c_void);
                         f(&mut control_flow, Event::WindowEvent{ window_id, event: WindowEvent::FocusChanged(false) });
                     },
+                    ResizeRequest => {
+                        // NOTE: A request is not exactly a resize...
+                        let resize = unsafe{ &e.resize };
+                        let window_id = WindowId(resize.window as *mut c_void);
+                        let size = PhysicalSize::new(resize.width as u32, resize.height as u32);
+                        f(&mut control_flow, Event::WindowEvent{ window_id, event: WindowEvent::Resized(size) });
+                    },
                     // TODO: Paint =>  { pushed_paint = true; break; }
                     _ => {},
                 }
@@ -541,7 +563,7 @@ impl WindowTrait for X11Window {
             inner_size.width, inner_size.height,
             1,
             black, white) };
-        unsafe{ XSelectInput(srvr.0, handle, ExposureMask | FocusChangeMask) };
+        unsafe{ XSelectInput(srvr.0, handle, ExposureMask | FocusChangeMask | ResizeRedirectMask) };
         Self{
             srvr,
             handle,
