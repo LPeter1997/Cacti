@@ -4,6 +4,7 @@
 use std::ffi::c_void;
 use std::os::raw::{c_char, c_int, c_uint, c_long, c_ulong};
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::ptr;
 use std::mem;
 use super::*;
@@ -99,12 +100,17 @@ extern "C" {
     fn XResizeWindow(
         display: *mut c_void,
         window : c_ulong    ,
-        width  : c_uint     , 
+        width  : c_uint     ,
         height : c_uint     ,
     ) -> c_int;
+    fn XEventsQueued(display: *mut c_void, mode: c_int) -> c_int;
+    fn XPending(display: *mut c_void) -> c_int;
 }
 
 const ExposureMask: c_long = 0x8000;
+const StructureNotifyMask: c_long = 0x20000;
+const SubstructureNotifyMask: c_long = 0x80000;
+const FocusChangeMask: c_long = 0x200000;
 
 const CWBackPixmap: c_ulong = 1 << 0;
 const CWBackPixel: c_ulong = 1 << 1;
@@ -137,8 +143,19 @@ const PAspect: c_long = 1 << 7;
 const PBaseSize: c_long = 1 << 8;
 const PWinGravity: c_long =	1 << 9;
 
+const CreateNotify: c_int = 16;
+const DestroyNotify: c_int = 17;
+const FocusIn: c_int = 9;
+const FocusOut: c_int = 10;
+
+const QueuedAlready: c_int = 0;
+
 #[repr(C)]
-struct XEvent {
+union XEvent {
+    ty: c_int,
+    create_notify: XCreateWindowEvent,
+    destroy_notify: XDestroyWindowEvent,
+    focus: XFocusChangeEvent,
     pad: [c_long; 24],
 }
 
@@ -146,6 +163,46 @@ impl XEvent {
     fn new() -> Self {
         unsafe{ mem::zeroed() }
     }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct XCreateWindowEvent {
+    ty: c_int,
+    serial: c_ulong,
+    send_event: c_int,
+    display: *mut c_void,
+    parent: c_ulong,
+    window: c_ulong,
+    x: c_int,
+    y: c_int,
+    width: c_int,
+    height: c_int,
+    border_width: c_int,
+    override_redirect: c_int,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct XDestroyWindowEvent {
+	ty: c_int,
+	serial: c_ulong,
+	send_event: c_int,
+	display: *mut c_void,
+	event: c_ulong,
+	window: c_ulong,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct XFocusChangeEvent {
+	ty: c_int,
+	serial: c_ulong,
+	send_event: c_int,
+	display: *mut c_void,
+	window: c_ulong,
+	mode: c_int,
+	detail: c_int,
 }
 
 #[repr(C)]
@@ -369,22 +426,93 @@ impl MonitorTrait for X11Monitor {
 }
 
 #[derive(Debug)]
-pub struct X11EventLoop {}
+pub struct X11EventLoop {
+    windows: HashSet<c_ulong>,
+}
 
 impl EventLoopTrait for X11EventLoop {
     fn new() -> Self {
-        Self{}
+        Self{
+            windows: HashSet::new(),
+        }
     }
 
-    fn add_window(&mut self, wnd: &WindowImpl) {
+    fn add_window(&mut self, wnd: &X11Window) {
+        self.windows.insert(wnd.handle);
     }
 
-    fn run<F>(&mut self, f: F)
+    fn run<F>(&mut self, mut f: F)
         where F: FnMut(&mut ControlFlow, Event) + 'static {
         let srvr = Connection::new();
         let mut e = XEvent::new();
+        let mut unread = false;
+        let mut control_flow = ControlFlow::Poll;
+        let mut pushed_paint;
         loop {
-            unsafe{ XNextEvent(srvr.0, &mut e) };
+            // Inner loop for events before redraw
+            pushed_paint = false;
+            loop {
+                if !unread {
+                    // We don't have any messages read in
+                    let peek = unsafe{ XPending(srvr.0) };
+                    if peek == 0 {
+                        // Consumed all events, done
+                        break;
+                    }
+                    // An event to handle
+                    unsafe{ XNextEvent(srvr.0, &mut e) };
+                }
+                match unsafe{ e.ty } {
+                    CreateNotify => {
+                        let crea = unsafe{ &e.create_notify };
+                        if self.windows.contains(&crea.window) {
+                            let window_id = WindowId(crea.window as *mut c_void);
+                            f(&mut control_flow, Event::WindowEvent{ window_id, event: WindowEvent::Created });
+                        }
+                    },
+                    DestroyNotify => {
+                        let dest = unsafe{ &e.destroy_notify };
+                        if self.windows.contains(&dest.window) {
+                            let window_id = WindowId(dest.window as *mut c_void);
+                            f(&mut control_flow, Event::WindowEvent{ window_id, event: WindowEvent::Closed });
+                        }
+                    },
+                    FocusIn => {
+                        let focus = unsafe{ &e.focus };
+                        let window_id = WindowId(focus.window as *mut c_void);
+                        f(&mut control_flow, Event::WindowEvent{ window_id, event: WindowEvent::FocusChanged(true) });
+                    },
+                    FocusOut => {
+                        let focus = unsafe{ &e.focus };
+                        let window_id = WindowId(focus.window as *mut c_void);
+                        f(&mut control_flow, Event::WindowEvent{ window_id, event: WindowEvent::FocusChanged(false) });
+                    },
+                    // TODO: Paint =>  { pushed_paint = true; break; }
+                    _ => {},
+                }
+                unread = false;
+            }
+
+            if !pushed_paint {
+                // No paint event happened, we explicitly do a LogicUpdate
+                // TODO
+                // The logic update could have enforced a redraw
+                // TODO
+            }
+
+            // TODO: After redraw
+
+            match control_flow {
+                ControlFlow::Exit => break,
+                ControlFlow::Poll => {}, // We already poll at the top
+                ControlFlow::Wait => {
+                    let res = unsafe{ XNextEvent(srvr.0, &mut e) };
+                    if res == 0 {
+                        break;
+                    }
+                    unread = true;
+                }
+            }
         }
     }
 }
@@ -405,6 +533,7 @@ impl WindowTrait for X11Window {
         let black = unsafe{ XBlackPixel(srvr.0, 0) };
         let white = unsafe{ XWhitePixel(srvr.0, 0) };
         let inner_size = PhysicalSize::new(200, 200);
+        unsafe{ XSelectInput(srvr.0, root, SubstructureNotifyMask) };
         let handle = unsafe{ XCreateSimpleWindow(
             srvr.0,
             root,
@@ -412,11 +541,11 @@ impl WindowTrait for X11Window {
             inner_size.width, inner_size.height,
             1,
             black, white) };
-        unsafe{ XSelectInput(srvr.0, handle, ExposureMask) };
-        Self{ 
-            srvr, 
-            handle, 
-            resizable: true, 
+        unsafe{ XSelectInput(srvr.0, handle, ExposureMask | FocusChangeMask) };
+        Self{
+            srvr,
+            handle,
+            resizable: true,
             inner_size,
         }
     }
@@ -453,7 +582,7 @@ impl WindowTrait for X11Window {
 
     fn set_resizable(&mut self, res: bool) -> bool {
         self.resizable = res;
-        let mut hints_ptr = unsafe{ XAllocSizeHints() };
+        let hints_ptr = unsafe{ XAllocSizeHints() };
         let mut hints = unsafe{ &mut *hints_ptr };
 
         if !res {
@@ -496,11 +625,11 @@ impl WindowTrait for X11Window {
     fn set_inner_size(&mut self, siz: PhysicalSize) -> bool {
         self.inner_size = siz;
         unsafe{ XResizeWindow(self.srvr.0, self.handle, siz.width, siz.height) };
-        // NOTE: Workaround, because it looks like without processing events, 
-        // X11 keeps reporting the old sizes, so set_resizable locks to the old 
+        // NOTE: Workaround, because it looks like without processing events,
+        // X11 keeps reporting the old sizes, so set_resizable locks to the old
         // size.
         if !self.resizable {
-            let mut hints_ptr = unsafe{ XAllocSizeHints() };
+            let hints_ptr = unsafe{ XAllocSizeHints() };
             let mut hints = unsafe{ &mut *hints_ptr };
             hints.flags = PMinSize | PMaxSize;
             hints.min_width = siz.width as c_int;
