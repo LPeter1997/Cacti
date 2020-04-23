@@ -8,6 +8,9 @@ use std::ptr;
 use std::time::SystemTime;
 use crate::dyn_lib::*;
 
+// TODO: Improve this! I'm sure we could somehow make the host API pass a trait
+// instead of a pile of pointers!
+
 // ////////////////////////////////////////////////////////////////////////// //
 //                                    API                                     //
 // ////////////////////////////////////////////////////////////////////////// //
