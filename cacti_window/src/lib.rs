@@ -324,15 +324,24 @@ type WindowImpl = impls::WindowImpl;
 
 #[cfg(all(test, not(CI)))]
 mod tests {
+    use std::rc::Rc;
+    use std::cell::RefCell;
     use super::*;
+
+    fn new_event_vec() -> (Rc<RefCell<Vec<Event>>>, Rc<RefCell<Vec<Event>>>) {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        (events.clone(), events)
+    }
 
     #[test]
     fn test_empty_loop() {
-        let mut events: Vec<Event> = Vec::new();
+        let (events, events_in) = new_event_vec();
         let mut event_loop = EventLoop::new();
-        event_loop.run(|control_flow, event| {
+        event_loop.run(move |control_flow, event| {
             *control_flow = ControlFlow::Exit;
+
+            events_in.borrow_mut().push(event);
         });
-        assert_eq!(events.as_slice(), &[]);
+        assert_eq!(events.borrow().as_slice(), &[]);
     }
 }
