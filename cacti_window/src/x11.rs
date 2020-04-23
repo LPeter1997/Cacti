@@ -159,6 +159,7 @@ union XEvent {
     destroy_notify: XDestroyWindowEvent,
     focus: XFocusChangeEvent,
     resize: XResizeRequestEvent,
+    expose: XExposeEvent,
     pad: [c_long; 24],
 }
 
@@ -218,6 +219,21 @@ struct XResizeRequestEvent {
     window: c_ulong,
     width: c_int,
     height: c_int,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct XExposeEvent {
+    ty: c_int,
+	serial: c_ulong,
+	send_event: c_int,
+	display: *mut c_void,
+    window: c_ulong,
+    x: c_int,
+    y: c_int,
+    width: c_int,
+    height: c_int,
+    count: c_int,
 }
 
 #[repr(C)]
@@ -509,20 +525,28 @@ impl EventLoopTrait for X11EventLoop {
                         let size = PhysicalSize::new(resize.width as u32, resize.height as u32);
                         f(&mut control_flow, Event::WindowEvent{ window_id, event: WindowEvent::Resized(size) });
                     },
+                    Expose => {
+
+                    },
                     // TODO: Paint =>  { pushed_paint = true; break; }
                     _ => {},
                 }
                 unread = false;
             }
 
+            // TODO: For now we always just paint here
             if !pushed_paint {
                 // No paint event happened, we explicitly do a LogicUpdate
-                // TODO
+                f(&mut control_flow, Event::LogicUpdate);
                 // The logic update could have enforced a redraw
-                // TODO
+                // TODO: For now we just redraw anyway
+                for w in &self.windows {
+                    let window_id = WindowId(*w as *mut c_void);
+                    f(&mut control_flow, Event::Redraw(window_id));
+                }
             }
 
-            // TODO: After redraw
+            f(&mut control_flow, Event::AfterRedraw);
 
             match control_flow {
                 ControlFlow::Exit => break,
