@@ -132,7 +132,7 @@ pub enum ControlFlow {
     Exit,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Event {
     WindowEvent{
         window_id: WindowId,
@@ -145,7 +145,7 @@ pub enum Event {
 }
 
 // TODO: Event for DPI/scale changes
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum WindowEvent {
     Created,
     CloseRequested,
@@ -158,7 +158,7 @@ pub enum WindowEvent {
 //                            Size representations                            //
 // ////////////////////////////////////////////////////////////////////////// //
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Dpi {
     pub horizontal: f64,
     pub vertical: f64,
@@ -170,7 +170,7 @@ impl Dpi {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PhysicalPosition {
     pub x: i32,
     pub y: i32,
@@ -189,7 +189,7 @@ impl PhysicalPosition {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PhysicalSize {
     pub width: u32,
     pub height: u32,
@@ -208,7 +208,7 @@ impl PhysicalSize {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LogicalPosition {
     pub x: f64,
     pub y: f64,
@@ -227,7 +227,7 @@ impl LogicalPosition {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LogicalSize {
     pub width: f64,
     pub height: f64,
@@ -317,3 +317,22 @@ mod impls {
 type MonitorImpl = impls::MonitorImpl;
 type EventLoopImpl = impls::EventLoopImpl;
 type WindowImpl = impls::WindowImpl;
+
+// ////////////////////////////////////////////////////////////////////////// //
+//                                   Tests                                    //
+// ////////////////////////////////////////////////////////////////////////// //
+
+#[cfg(all(test, not(CI)))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_empty_loop() {
+        let mut events: Vec<Event> = Vec::new();
+        let mut event_loop = EventLoop::new();
+        event_loop.run(|control_flow, event| {
+            *control_flow = ControlFlow::Exit;
+        });
+        assert_eq!(events.as_slice(), &[]);
+    }
+}

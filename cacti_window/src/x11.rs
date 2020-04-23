@@ -525,9 +525,6 @@ impl EventLoopTrait for X11EventLoop {
                         let size = PhysicalSize::new(resize.width as u32, resize.height as u32);
                         f(&mut control_flow, Event::WindowEvent{ window_id, event: WindowEvent::Resized(size) });
                     },
-                    Expose => {
-
-                    },
                     // TODO: Paint =>  { pushed_paint = true; break; }
                     _ => {},
                 }
@@ -568,6 +565,7 @@ pub struct X11Window {
     srvr: Connection,
     handle: c_ulong,
     resizable: bool,
+    // TODO: We need to actually update this!
     inner_size: PhysicalSize,
 }
 
